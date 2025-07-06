@@ -1,0 +1,43 @@
+# Core FastAPI and server
+fastapi==0.115.11
+uvicorn==0.34.0
+pydantic==2.10.6
+python-dotenv==1.0.1
+
+# NumPy version constraint to avoid compatibility issues
+numpy<2
+
+# PyTorch (compatible with NumPy 1.x)
+torch
+torchvision
+torchaudio
+
+# AI and ML dependencies
+openai==1.65.5
+openai-whisper
+
+# LangChain with updated packages (no deprecated imports)
+langchain==0.3.21
+langchain-huggingface
+langchain-qdrant
+langchain-community
+
+# Embeddings and vector search
+sentence-transformers==3.4.1
+faiss-cpu==1.10.0
+qdrant-client
+
+# Web scraping and processing
+beautifulsoup4==4.13.3
+feedparser==6.0.11
+requests==2.32.3
+selenium==4.31.0
+
+# Document processing
+pymupdf==1.25.4
+yt-dlp
+
+# Additional dependencies
+setuptools
+urllib3<2
+python-multipart==0.0.6

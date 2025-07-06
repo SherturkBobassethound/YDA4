@@ -1,0 +1,1 @@
+Follow instructions [here](https://qdrant.tech/documentation/quickstart/#download-and-run) to run qdrant locally

@@ -1,0 +1,121 @@
+services:
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant_db
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Ollama (LLM service)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_service
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - app_network
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Ollama API wrapper service
+  ollama-api:
+    build:
+      context: ./app/ollama-service
+      dockerfile: Dockerfile
+    container_name: ollama_api
+    ports:
+      - "8001:8001"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - app_network
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Backend API
+  backend:
+    build:
+      context: ./app/backend
+      dockerfile: Dockerfile
+    container_name: backend_api
+    ports:
+      - "8000:8000"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama-api:
+        condition: service_healthy
+    networks:
+      - app_network
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - OLLAMA_API_URL=http://ollama-api:8001
+      - ENVIRONMENT=production
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./app/frontend
+      dockerfile: Dockerfile
+    container_name: frontend_app
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app_network
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+      - VITE_OLLAMA_API_URL=http://localhost:8001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+    driver: local
+  ollama_data:
+    driver: local
+
+networks:
+  app_network:
+    driver: bridge
+    name: yoda_network
