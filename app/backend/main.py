@@ -83,25 +83,181 @@ class ChatRequest(BaseModel):
 def download_youtube_audio(url: str) -> str:
     """Download audio from YouTube video and save to temporary file"""
     logger.info(f"Starting download of YouTube video: {url}")
+    
+    # First, try to get available formats to make an informed decision
+    def get_available_formats(video_url):
+        """Get available formats for the video"""
+        format_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+            'noplaylist': True,
+        }
+        try:
+            with yt_dlp.YoutubeDL(format_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                return info.get('formats', [])
+        except Exception as e:
+            logger.warning(f"Could not get format info: {str(e)}")
+            return []
+    
+    # Get available formats
+    available_formats = get_available_formats(url)
+    logger.info(f"Found {len(available_formats)} available formats")
+    
+    # Build format selector based on available formats
+    format_selector = 'bestaudio/best/worst'
+    if available_formats:
+        # Check if we have audio-only formats
+        audio_formats = [f for f in available_formats if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+        if audio_formats:
+            # Prefer specific audio formats if available
+            format_selector = 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio[ext=mp3]/bestaudio/best/worst'
+        else:
+            # Fall back to video formats if no audio-only available
+            format_selector = 'best[height<=480]/best/worst'
+    
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': format_selector,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'outtmpl': '%(id)s.%(ext)s'
+        'outtmpl': '%(id)s.%(ext)s',
+        'noplaylist': True,
+        'writethumbnail': False,
+        'writeinfojson': False,
+        'ignoreerrors': False,
+        'no_warnings': False,
+        # Updated extractor args for current yt-dlp version
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web', 'ios'],
+                'skip': ['dash', 'hls']
+            }
+        }
     }
     
     try:
+        logger.info("Attempting primary download configuration...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             audio_file = f"{info['id']}.mp3"
             logger.info(f"Successfully downloaded audio: {audio_file}")
             return audio_file
     except Exception as e:
-        logger.error(f"Error downloading YouTube video: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Failed to download YouTube video: {str(e)}")
+        logger.error(f"Primary download failed: {str(e)}")
+        logger.info("Primary download failed, attempting fallback...")
+        
+        # Try fallback configuration with more permissive settings
+        logger.info("Trying fallback configuration...")
+        fallback_opts = {
+            'format': 'best/worst',  # More permissive format selection
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '128',  # Lower quality for compatibility
+            }],
+            'outtmpl': '%(id)s.%(ext)s',
+            'noplaylist': True,
+            'ignoreerrors': True,
+            'no_warnings': True,
+            # Updated extractor args for current yt-dlp version
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'web', 'ios', 'tv_embedded'],
+                    'skip': ['dash', 'hls'],
+                    'include_live_chat': False
+                }
+            },
+            # Try different user agents
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36'
+            }
+        }
+        
+        try:
+            logger.info("Attempting fallback download configuration...")
+            with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                audio_file = f"{info['id']}.mp3"
+                logger.info(f"Successfully downloaded audio with fallback: {audio_file}")
+                return audio_file
+        except Exception as fallback_error:
+            logger.error(f"Fallback download also failed: {str(fallback_error)}")
+            
+            # Try third fallback: download video and extract audio
+            logger.info("Trying video-to-audio conversion fallback...")
+            video_fallback_opts = {
+                'format': 'worst[height<=480]/worst',  # Get worst video quality
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '128',
+                }],
+                'outtmpl': '%(id)s.%(ext)s',
+                'noplaylist': True,
+                'ignoreerrors': True,
+                'no_warnings': True,
+                # Updated extractor args for current yt-dlp version
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android', 'web', 'ios', 'tv_embedded'],
+                        'skip': ['dash', 'hls'],
+                        'include_live_chat': False
+                    }
+                },
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36'
+                }
+            }
+            
+            try:
+                logger.info("Attempting video-to-audio conversion fallback...")
+                with yt_dlp.YoutubeDL(video_fallback_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    audio_file = f"{info['id']}.mp3"
+                    logger.info(f"Successfully downloaded audio with video fallback: {audio_file}")
+                    return audio_file
+            except Exception as video_fallback_error:
+                logger.error(f"Video fallback also failed: {str(video_fallback_error)}")
+                
+                # Final fallback: try with the most permissive settings possible
+                logger.info("Trying final permissive fallback...")
+                final_fallback_opts = {
+                    'format': 'worst',  # Most permissive format selection
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '96',  # Very low quality for maximum compatibility
+                    }],
+                    'outtmpl': '%(id)s.%(ext)s',
+                    'noplaylist': True,
+                    'ignoreerrors': True,
+                    'no_warnings': True,
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['android', 'web', 'ios', 'tv_embedded', 'mweb'],
+                            'skip': ['dash', 'hls'],
+                            'include_live_chat': False
+                        }
+                    },
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36'
+                    }
+                }
+                
+                try:
+                    logger.info("Attempting final permissive fallback...")
+                    with yt_dlp.YoutubeDL(final_fallback_opts) as ydl:
+                        info = ydl.extract_info(url, download=True)
+                        audio_file = f"{info['id']}.mp3"
+                        logger.info(f"Successfully downloaded audio with final fallback: {audio_file}")
+                        return audio_file
+                except Exception as final_error:
+                    logger.error(f"Final fallback also failed: {str(final_error)}")
+                    raise HTTPException(status_code=400, detail=f"Failed to download YouTube video after all attempts. Primary error: {str(e)}. Fallback error: {str(fallback_error)}. Video fallback error: {str(video_fallback_error)}. Final fallback error: {str(final_error)}")
 
 def transcribe_audio(audio_path: str) -> str:
     """Transcribe audio file using Whisper model"""
