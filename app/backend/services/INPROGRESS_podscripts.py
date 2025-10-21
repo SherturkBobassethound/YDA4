@@ -1,8 +1,26 @@
 #TODO: Integrate into our other services, clean up, add error handling, logging, etc.
 
+# %%
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
+
+def extract_podcast_info_from_apple_url(apple_podcast_url):
+    resp = requests.get(apple_podcast_url)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    
+    schema_script = soup.find("script", {"id": "schema:episode", "type": "application/ld+json"})
+    
+    if schema_script:
+        import json
+        data = json.loads(schema_script.string)
+        
+        podcast_title = data["partOfSeries"]["name"]
+        episode_name = data["name"]
+        
+        return podcast_title, episode_name
+    else:
+        return None, None
 
 BASE_URL = "https://podscripts.co"
 
@@ -13,7 +31,7 @@ def get_podcast_url(podcast_name):
     resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    pods = soup.find_all("div", class_="single-pod")
+    pods = soup.find_all("div", class_="single-pod") # This is the key to finding the podcasts available
 
     for pod in pods:
         a = pod.find("a")
@@ -71,8 +89,10 @@ def extract_transcript_from_episode(episode_url):
     return transcript
 
 
-def fetch_transcript(podcast_name, episode_title):
+def fetch_transcript(apple_podcast_url):
     """End-to-end: get podcast → episode → transcript."""
+
+    podcast_name, episode_title = extract_podcast_info_from_apple_url(apple_podcast_url)
     podcast_url = get_podcast_url(podcast_name)
     print(f"Found podcast: {podcast_url}")
 
@@ -83,13 +103,13 @@ def fetch_transcript(podcast_name, episode_title):
     print("Transcript extracted successfully.")
     return transcript_text
 
-
+# %%
 # Example usage:
-if __name__ == "__main__":
-    podcast_name = "Huberman Lab"
-    episode_title = "Essentials: Time Perception, Memory & Focus"
-    try:
-        transcript = fetch_transcript(podcast_name, episode_title)
-        print(transcript)
-    except Exception as e:
-        print("Error:", e)
+
+# apple_podcast_url = "https://podcasts.apple.com/us/podcast/huberman-lab/id1545953110?i=1000732620228"
+apple_podcast_url = "https://podcasts.apple.com/us/podcast/huberman-lab/id1545953110?i=1000727833630"
+try:
+    transcript = fetch_transcript(apple_podcast_url)
+    print(transcript)
+except Exception as e:
+    print("Error:", e)
