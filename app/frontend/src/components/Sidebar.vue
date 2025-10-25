@@ -19,6 +19,8 @@
       <div v-if="processingStatus" class="status">{{ processingStatus }}</div>
     </div>
 
+    <!-- Podcast URL Processing Section (This section was removed) -->
+
     <div class="divider">OR</div>
 
     <!-- File Upload Section -->
@@ -49,23 +51,20 @@
 
     <div class="divider">OR</div>
 
-    <!-- Podcast List Management -->
+    <!-- Podcast List Management (Repurposed for Processing) -->
     <div class="podcast-list-section">
-      <h3>Manage Podcast URLs</h3>
-      <ul>
-        <li v-for="(source, index) in sources" :key="index" class="source-item">
-          <span class="source-text">{{ source }}</span>
-          <button @click="removeSource(index)" class="remove-btn">×</button>
-        </li>
-      </ul>
+      <h3>Process Podcast URL</h3>
+      <!-- List (ul) removed -->
       <div class="add-source">
         <input 
-          v-model="newSource" 
-          placeholder="Podcast URL" 
-          @keyup.enter="addSource"
+          v-model="podcastUrl" 
+          placeholder="Paste Apple Podcast URL here..." 
+          @keyup.enter="processPodcast"
           class="source-input"
         />
-        <button @click="addSource" class="add-btn">Add</button>
+        <button @click="processPodcast" class="process-btn" :disabled="isProcessing">
+          {{ isProcessing ? 'Processing...' : 'Process' }}
+        </button>
       </div>
     </div>
 
@@ -106,15 +105,13 @@ const getApiBaseUrl = (): string => {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || getApiBaseUrl();
 
-// Podcast list management
-const sources = ref<string[]>([
-  'Sample Podcast 1',
-  'Sample Podcast 2'
-]);
-const newSource = ref('');
+// Podcast list management (Removed)
+// const sources = ref<string[]>(...);
+// const newSource = ref('');
 
-// YouTube processing state
+// URL processing state
 const youtubeUrl = ref('');
+const podcastUrl = ref(''); // Used by the repurposed section
 const isProcessing = ref(false);
 const processingStatus = ref('');
 
@@ -155,17 +152,9 @@ const checkApiStatus = async () => {
   }
 };
 
-// Podcast list methods
-const addSource = () => {
-  if (newSource.value.trim() !== '') {
-    sources.value.push(newSource.value.trim());
-    newSource.value = '';
-  }
-};
-
-const removeSource = (index: number) => {
-  sources.value.splice(index, 1);
-};
+// Podcast list methods (Removed)
+// const addSource = () => { ... };
+// const removeSource = (index: number) => { ... };
 
 // File handling methods
 const triggerFileSelect = () => {
@@ -257,6 +246,66 @@ const processYoutube = async () => {
   }
 };
 
+// --- PODCAST PROCESSING FUNCTION ---
+const processPodcast = async () => {
+  if (!podcastUrl.value.trim()) return;
+  
+  if (!apiStatus.value.backend) {
+    processingStatus.value = 'Backend API is not available. Please wait for services to start.';
+    return;
+  }
+  
+  isProcessing.value = true;
+  processingStatus.value = 'Starting Podcast processing...';
+  
+  // Create progress simulation for podcast processing
+  const progressSteps = [
+    'Fetching podcast info...',
+    'Downloading episode (or scraping transcript)...',
+    'Transcribing with Whisper (if audio)...',
+    'Generating summary with Ollama...',
+    'Almost done...'
+  ];
+  
+  let stepIndex = 0;
+  const progressInterval = setInterval(() => {
+    if (stepIndex < progressSteps.length - 1) {
+      processingStatus.value = progressSteps[stepIndex];
+      stepIndex++;
+    }
+  }, 15000); // Update every 15 seconds
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/process-podcast`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        podcast_url: podcastUrl.value
+      }),
+      signal: AbortSignal.timeout(600000) // 10 minute timeout
+    });
+    
+    clearInterval(progressInterval);
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(errorData.detail || 'Failed to process Podcast URL');
+    }
+    
+    const data = await response.json();
+    handleTranscriptionResult(data);
+    
+  } catch (error: any) {
+    clearInterval(progressInterval);
+    processingStatus.value = handleApiError(error, 'Podcast processing');
+  } finally {
+    isProcessing.value = false;
+  }
+};
+
+
 const processAudio = async () => {
   if (!selectedFile.value) return;
   
@@ -323,6 +372,7 @@ const handleTranscriptionResult = (data: any) => {
   
   // Clear the form
   youtubeUrl.value = '';
+  podcastUrl.value = ''; // Clears the podcast input
   selectedFile.value = null;
   if (fileInput.value) {
     fileInput.value.value = '';
@@ -472,7 +522,7 @@ const emit = defineEmits<{
   font-size: 0.9rem;
 }
 
-/* Podcast List Styles */
+/* Podcast List Styles (Repurposed) */
 .sidebar ul {
   list-style: none;
   padding: 0;
@@ -533,25 +583,15 @@ const emit = defineEmits<{
   border-radius: 6px;
   font-size: 0.9rem;
   outline: none;
+  width: 100%; /* Ensure it's full width */
+  margin-bottom: 10px; /* Match other inputs */
 }
 
 .source-input:focus {
   border-color: #1976d2;
 }
 
-.add-btn {
-  padding: 10px;
-  background-color: #1976d2;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.add-btn:hover {
-  background-color: #1565c0;
-}
+/* 'add-btn' class is no longer used, .process-btn styles apply */
 
 /* API Status Styles */
 .api-status {
@@ -591,3 +631,4 @@ const emit = defineEmits<{
   background-color: #dc3545;
 }
 </style>
+
