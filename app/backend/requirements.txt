@@ -41,3 +41,6 @@ yt-dlp
 setuptools
 urllib3<2
 python-multipart==0.0.6
+
+# Authentication
+python-jose[cryptography]==3.3.0

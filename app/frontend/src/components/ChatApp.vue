@@ -81,6 +81,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from 'vue';
+import { useApi } from '../composables/useApi'
 
 interface Message {
   sender: 'user' | 'machine';
@@ -94,11 +95,9 @@ interface ModelInfo {
   description: string;
 }
 
-// Get API base URLs from environment or use defaults
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
-  (window.location.hostname === 'localhost' ? 'http://localhost:8000' : 'http://backend:8000');
+const { fetchWithAuth, API_BASE_URL } = useApi()
 
-const OLLAMA_API_URL = import.meta.env.VITE_OLLAMA_API_URL || 
+const OLLAMA_API_URL = import.meta.env.VITE_OLLAMA_API_URL ||
   (window.location.hostname === 'localhost' ? 'http://localhost:8001' : 'http://ollama-api:8001');
 
 // State
@@ -195,15 +194,15 @@ const handleTranscriptionComplete = (data: { transcription: string; summary: str
 const sendMessage = async () => {
   const txt = newMessage.value.trim();
   if (!txt) return;
-  
+
   messages.value.push({ sender: 'user', text: txt });
   newMessage.value = '';
   scrollToBottom();
-  
+
   isProcessing.value = true;
-  
+
   try {
-    const response = await fetch(`${API_BASE_URL}/chat`, {
+    const response = await fetchWithAuth(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -215,19 +214,19 @@ const sendMessage = async () => {
       }),
       signal: AbortSignal.timeout(120000) // 2 minute timeout for chat
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
       throw new Error(errorData.detail || 'Failed to get chat response');
     }
-    
+
     const data = await response.json();
     messages.value.push({
       sender: 'machine',
       text: data.response,
       model: selectedModel.value
     });
-    
+
   } catch (error: any) {
     console.error('Error sending message:', error);
     let errorMessage = 'Sorry, I encountered an error. Please try again.';

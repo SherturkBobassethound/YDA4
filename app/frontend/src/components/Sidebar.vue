@@ -88,23 +88,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useApi } from '../composables/useApi'
+import { useAuth } from '../composables/useAuth'
 
-// Get API base URLs from environment or use container-aware defaults
-const getApiBaseUrl = (): string => {
-  // Check if running in browser (client-side)
-  if (typeof window !== 'undefined') {
-    // If hostname is localhost, we're in development
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:8000';
-    }
-    // Otherwise, use the current host (for production containers)
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
-  }
-  // Fallback for SSR
-  return 'http://backend:8000';
-};
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || getApiBaseUrl();
+const { fetchWithAuth, API_BASE_URL } = useApi()
+const { isAuthenticated } = useAuth()
 
 // Podcast list management
 const sources = ref<string[]>([
@@ -201,15 +189,20 @@ const handleApiError = (error: any, context: string): string => {
 // API processing methods with improved error handling
 const processYoutube = async () => {
   if (!youtubeUrl.value.trim()) return;
-  
+
+  if (!isAuthenticated.value) {
+    processingStatus.value = 'Please log in to process content.';
+    return;
+  }
+
   if (!apiStatus.value.backend) {
     processingStatus.value = 'Backend API is not available. Please wait for services to start.';
     return;
   }
-  
+
   isProcessing.value = true;
   processingStatus.value = 'Starting YouTube processing...';
-  
+
   // Create progress simulation
   const progressSteps = [
     'Downloading YouTube video...',
@@ -218,7 +211,7 @@ const processYoutube = async () => {
     'Generating summary with Ollama...',
     'Almost done...'
   ];
-  
+
   let stepIndex = 0;
   const progressInterval = setInterval(() => {
     if (stepIndex < progressSteps.length - 1) {
@@ -226,9 +219,9 @@ const processYoutube = async () => {
       stepIndex++;
     }
   }, 15000); // Update every 15 seconds
-  
+
   try {
-    const response = await fetch(`${API_BASE_URL}/process-youtube`, {
+    const response = await fetchWithAuth(`${API_BASE_URL}/process-youtube`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -238,17 +231,17 @@ const processYoutube = async () => {
       }),
       signal: AbortSignal.timeout(600000) // 10 minute timeout
     });
-    
+
     clearInterval(progressInterval);
-    
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
       throw new Error(errorData.detail || 'Failed to process YouTube URL');
     }
-    
+
     const data = await response.json();
     handleTranscriptionResult(data);
-    
+
   } catch (error: any) {
     clearInterval(progressInterval);
     processingStatus.value = handleApiError(error, 'YouTube processing');
@@ -259,15 +252,20 @@ const processYoutube = async () => {
 
 const processAudio = async () => {
   if (!selectedFile.value) return;
-  
+
+  if (!isAuthenticated.value) {
+    processingStatus.value = 'Please log in to process content.';
+    return;
+  }
+
   if (!apiStatus.value.backend) {
     processingStatus.value = 'Backend API is not available. Please wait for services to start.';
     return;
   }
-  
+
   isProcessing.value = true;
   processingStatus.value = 'Starting audio processing...';
-  
+
   // Create progress simulation for audio processing
   const progressSteps = [
     'Uploading audio file...',
@@ -275,7 +273,7 @@ const processAudio = async () => {
     'Generating summary with Ollama...',
     'Finalizing...'
   ];
-  
+
   let stepIndex = 0;
   const progressInterval = setInterval(() => {
     if (stepIndex < progressSteps.length - 1) {
@@ -283,27 +281,27 @@ const processAudio = async () => {
       stepIndex++;
     }
   }, 10000); // Update every 10 seconds
-  
+
   try {
     const formData = new FormData();
     formData.append('file', selectedFile.value);
-    
-    const response = await fetch(`${API_BASE_URL}/process-audio`, {
+
+    const response = await fetchWithAuth(`${API_BASE_URL}/process-audio`, {
       method: 'POST',
       body: formData,
       signal: AbortSignal.timeout(600000) // 10 minute timeout
     });
-    
+
     clearInterval(progressInterval);
-    
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
       throw new Error(errorData.detail || 'Failed to process audio file');
     }
-    
+
     const data = await response.json();
     handleTranscriptionResult(data);
-    
+
   } catch (error: any) {
     clearInterval(progressInterval);
     processingStatus.value = handleApiError(error, 'Audio processing');
