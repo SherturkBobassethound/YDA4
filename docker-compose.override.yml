@@ -1,0 +1,16 @@
+services:
+  ollama-api:
+    depends_on:
+      - ollama
+    # Remove health check dependency
+
+  backend:
+    depends_on:
+      - qdrant
+      - ollama-api
+    # Remove health check dependency
+
+  frontend:
+    depends_on:
+      - backend
+    # Remove health check dependency

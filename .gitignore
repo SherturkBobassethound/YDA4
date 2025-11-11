@@ -32,7 +32,9 @@ out/
 .tscache/
 
 # Python
-__pycache__/
+*__pycache__/
+*.cpython*
+*.pyc
 *.py[cod]
 *$py.class
 *.so
