@@ -52,7 +52,16 @@ if [ ${#missing_commands[@]} -ne 0 ]; then
     exit 1
 fi
 
-echo -e "${GREEN}✓ All dependencies found${NC}\n"
+echo -e "${GREEN}✓ All dependencies found${NC}"
+
+# Check if Docker daemon is running
+echo -e "${YELLOW}Checking Docker daemon...${NC}"
+if ! docker info >/dev/null 2>&1; then
+    echo -e "${RED}Error: Docker daemon is not running${NC}"
+    echo "Please start Docker and try again."
+    exit 1
+fi
+echo -e "${GREEN}✓ Docker is running${NC}\n"
 
 # Check if .env exists, if not copy from .env.local
 if [ ! -f .env ]; then
@@ -69,15 +78,34 @@ fi
 echo -e "${BLUE}Starting Docker services (Qdrant & Ollama)...${NC}"
 docker-compose -f docker-compose.dev.yml up -d
 
-# Wait for services to be healthy
+# Wait for services to be healthy with timeout
 echo -e "${YELLOW}Waiting for Qdrant to be ready...${NC}"
-until curl -f http://localhost:6333/health >/dev/null 2>&1; do
+RETRY_COUNT=0
+MAX_RETRIES=30
+until curl -s http://localhost:6333/health >/dev/null 2>&1; do
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+        echo -e "${RED}✗ Qdrant failed to start after ${MAX_RETRIES} attempts${NC}"
+        echo -e "${YELLOW}Checking Docker logs:${NC}"
+        docker logs qdrant_db_dev --tail 20
+        exit 1
+    fi
+    echo -e "${YELLOW}  Attempt $RETRY_COUNT/$MAX_RETRIES...${NC}"
     sleep 2
 done
 echo -e "${GREEN}✓ Qdrant is ready${NC}"
 
 echo -e "${YELLOW}Waiting for Ollama to be ready...${NC}"
-until curl -f http://localhost:11434/api/version >/dev/null 2>&1; do
+RETRY_COUNT=0
+until curl -s http://localhost:11434/api/version >/dev/null 2>&1; do
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+        echo -e "${RED}✗ Ollama failed to start after ${MAX_RETRIES} attempts${NC}"
+        echo -e "${YELLOW}Checking Docker logs:${NC}"
+        docker logs ollama_service_dev --tail 20
+        exit 1
+    fi
+    echo -e "${YELLOW}  Attempt $RETRY_COUNT/$MAX_RETRIES...${NC}"
     sleep 2
 done
 echo -e "${GREEN}✓ Ollama is ready${NC}\n"
