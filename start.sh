@@ -4,9 +4,9 @@
 # This script handles health check issues and ensures all services start properly
 #
 # Usage:
-#   ./start.sh           - Normal start with health checks
-#   ./start.sh --dev     - Quick development mode (rebuilds code, minimal checks)
-#   ./start.sh --rebuild - Full rebuild from scratch
+#   ./start.sh           - Normal start with health checks (uses Docker cache)
+#   ./start.sh --dev     - Development mode (rebuilds code services without cache)
+#   ./start.sh --rebuild - Full rebuild from scratch (all services, no cache)
 
 set -e  # Exit on any error
 
@@ -17,7 +17,7 @@ REBUILD_MODE=false
 if [ "$1" = "--dev" ]; then
     DEV_MODE=true
     echo "🔧 Starting YODA Application in DEVELOPMENT MODE..."
-    echo "   (Rebuilding services to pick up code changes)"
+    echo "   (Rebuilding code services without cache to pick up latest changes)"
 elif [ "$1" = "--rebuild" ]; then
     REBUILD_MODE=true
     echo "🔄 Starting YODA Application with FULL REBUILD..."
@@ -141,11 +141,11 @@ docker system prune -f > /dev/null 2>&1 || true
 
 # Build images based on mode
 if [ "$REBUILD_MODE" = true ]; then
-    echo "🔄 Rebuilding all images from scratch..."
+    echo "🔄 Rebuilding all images from scratch (no cache)..."
     docker-compose -f "$COMPOSE_FILE" build --no-cache
 elif [ "$DEV_MODE" = true ]; then
-    echo "🏗️  Rebuilding code services (backend, frontend, ollama-api)..."
-    docker-compose -f "$COMPOSE_FILE" build backend frontend ollama-api
+    echo "🏗️  Rebuilding code services without cache (backend, frontend, ollama-api)..."
+    docker-compose -f "$COMPOSE_FILE" build --no-cache backend frontend ollama-api
 else
     echo "🏗️  Building images (if needed)..."
     docker-compose -f "$COMPOSE_FILE" build
@@ -336,6 +336,7 @@ echo "   Stop all:           ./stop.sh"
 echo "   Restart service:    docker-compose restart [service_name]"
 echo "   Quick deploy:       ./stop.sh && ./start.sh --dev"
 echo "   Full rebuild:       ./start.sh --rebuild"
+echo "   After git pull:     ./stop.sh && ./start.sh --dev  (rebuilds without cache)"
 echo ""
 
 # Show resource usage
