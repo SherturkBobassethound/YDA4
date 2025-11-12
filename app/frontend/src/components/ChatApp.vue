@@ -122,13 +122,55 @@ const availableModels = ref<ModelInfo[]>([
   { name: 'llama3:8b', size: '~4.7GB', description: 'High quality, slower responses' }
 ]);
 
+// Session persistence key
+const STORAGE_KEY = 'yoda_chat_session';
+
+// Load session from localStorage
+const loadSession = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const session = JSON.parse(saved);
+      if (session.hasTranscription) {
+        hasTranscription.value = session.hasTranscription;
+        transcription.value = session.transcription || '';
+        summary.value = session.summary || '';
+        messages.value = session.messages || [];
+        selectedModel.value = session.selectedModel || 'llama3.2:1b';
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to load session from localStorage:', error);
+  }
+};
+
+// Save session to localStorage
+const saveSession = () => {
+  try {
+    const session = {
+      hasTranscription: hasTranscription.value,
+      transcription: transcription.value,
+      summary: summary.value,
+      messages: messages.value,
+      selectedModel: selectedModel.value,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  } catch (error) {
+    console.warn('Failed to save session to localStorage:', error);
+  }
+};
+
 // Fetch available models on component mount
 onMounted(async () => {
+  // Load previous session first
+  loadSession();
+
   try {
     const response = await fetch(`${OLLAMA_API_URL}/models`, {
       signal: AbortSignal.timeout(10000)
     });
-    
+
     if (response.ok) {
       const data = await response.json();
       if (data.models && Array.isArray(data.models)) {
@@ -138,7 +180,7 @@ onMounted(async () => {
           size: model.size ? formatBytes(model.size) : 'Unknown',
           description: getModelDescription(model.name)
         }));
-        
+
         if (installedModels.length > 0) {
           availableModels.value = installedModels;
           // Set first available model as default if current selection not available
@@ -175,6 +217,7 @@ const getModelDescription = (modelName: string): string => {
 
 const onModelChange = () => {
   console.log('Model changed to:', selectedModel.value);
+  saveSession();
 };
 
 // Handle transcription data from Sidebar
@@ -182,13 +225,16 @@ const handleTranscriptionComplete = (data: { transcription: string; summary: str
   transcription.value = data.transcription;
   summary.value = data.summary;
   hasTranscription.value = true;
-  
+
   // Add welcome message
   messages.value.push({
     sender: 'machine',
     text: `Great! I've processed your audio using ${selectedModel.value}. You can now ask me questions about the content. What would you like to know?`,
     model: selectedModel.value
   });
+
+  // Save session to persist across page reloads
+  saveSession();
 };
 
 const sendMessage = async () => {
@@ -227,6 +273,10 @@ const sendMessage = async () => {
       model: selectedModel.value
     });
 
+
+    // Save session after each message exchange
+    saveSession();
+
   } catch (error: any) {
     console.error('Error sending message:', error);
     let errorMessage = 'Sorry, I encountered an error. Please try again.';
@@ -238,6 +288,9 @@ const sendMessage = async () => {
       text: errorMessage,
       model: selectedModel.value
     });
+
+    // Save session even on error
+    saveSession();
   } finally {
     isProcessing.value = false;
     scrollToBottom();
@@ -254,6 +307,9 @@ const reset = () => {
   summary.value = '';
   messages.value = [];
   showFullTranscription.value = false;
+
+  // Clear session from localStorage
+  localStorage.removeItem(STORAGE_KEY);
 };
 
 const scrollToBottom = async () => {
