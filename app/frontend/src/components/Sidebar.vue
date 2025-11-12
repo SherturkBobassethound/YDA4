@@ -2,17 +2,21 @@
   <div class="sidebar">
     <h2>Podcasts</h2>
     
-    <!-- YouTube URL Processing Section -->
+    <!-- Universal URL Processing Section -->
     <div class="processing-section">
-      <h3>Process YouTube URL</h3>
+      <h3>Process URL</h3>
       <div class="input-group">
         <input
           type="text"
-          v-model="youtubeUrl"
-          placeholder="Paste YouTube URL here..."
+          v-model="universalUrl"
+          placeholder="Paste YouTube or Apple Podcasts URL..."
           class="url-input"
+          @input="detectUrlType"
         />
-        <button @click="processYoutube" :disabled="isProcessing" class="process-btn">
+        <div v-if="detectedUrlType" class="url-type-indicator">
+          {{ detectedUrlType }}
+        </div>
+        <button @click="processUrl" :disabled="isProcessing || !universalUrl.trim()" class="process-btn">
           {{ isProcessing ? 'Processing...' : 'Process' }}
         </button>
       </div>
@@ -47,27 +51,6 @@
       </div>
     </div>
 
-    <div class="divider">OR</div>
-
-    <!-- Podcast List Management -->
-    <div class="podcast-list-section">
-      <h3>Manage Podcast URLs</h3>
-      <ul>
-        <li v-for="(source, index) in sources" :key="index" class="source-item">
-          <span class="source-text">{{ source }}</span>
-          <button @click="removeSource(index)" class="remove-btn">×</button>
-        </li>
-      </ul>
-      <div class="add-source">
-        <input 
-          v-model="newSource" 
-          placeholder="Podcast URL" 
-          @keyup.enter="addSource"
-          class="source-input"
-        />
-        <button @click="addSource" class="add-btn">Add</button>
-      </div>
-    </div>
 
     <!-- API Status Indicator -->
     <div class="api-status">
@@ -106,15 +89,9 @@ const getApiBaseUrl = (): string => {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || getApiBaseUrl();
 
-// Podcast list management
-const sources = ref<string[]>([
-  'Sample Podcast 1',
-  'Sample Podcast 2'
-]);
-const newSource = ref('');
-
-// YouTube processing state
-const youtubeUrl = ref('');
+// Universal URL processing state
+const universalUrl = ref('');
+const detectedUrlType = ref('');
 const isProcessing = ref(false);
 const processingStatus = ref('');
 
@@ -155,16 +132,63 @@ const checkApiStatus = async () => {
   }
 };
 
-// Podcast list methods
-const addSource = () => {
-  if (newSource.value.trim() !== '') {
-    sources.value.push(newSource.value.trim());
-    newSource.value = '';
+// URL detection logic
+const detectUrlType = () => {
+  const url = universalUrl.value.trim().toLowerCase();
+
+  if (!url) {
+    detectedUrlType.value = '';
+    return;
+  }
+
+  // Check for YouTube URLs
+  if (url.includes('youtube.com') || url.includes('youtu.be')) {
+    detectedUrlType.value = '🎥 YouTube Video';
+    return;
+  }
+
+  // Check for Apple Podcasts URLs
+  if (url.includes('podcasts.apple.com') || url.includes('itunes.apple.com')) {
+    detectedUrlType.value = '🎙️ Apple Podcast';
+    return;
+  }
+
+  // Unknown URL type
+  detectedUrlType.value = '❓ Unknown URL type';
+};
+
+// Universal URL processing router
+const processUrl = async () => {
+  const url = universalUrl.value.trim();
+  if (!url) return;
+
+  detectUrlType();
+
+  // Route based on detected URL type
+  if (detectedUrlType.value.includes('YouTube')) {
+    await processYoutubeUrl(url);
+  } else if (detectedUrlType.value.includes('Podcast')) {
+    await processPodcastUrl(url);
+  } else {
+    processingStatus.value = 'Unsupported URL type. Please use YouTube or Apple Podcasts URLs.';
+    setTimeout(() => {
+      processingStatus.value = '';
+    }, 3000);
   }
 };
 
-const removeSource = (index: number) => {
-  sources.value.splice(index, 1);
+// Process Apple Podcasts URL (placeholder for future implementation)
+const processPodcastUrl = async (url: string) => {
+  processingStatus.value = 'Apple Podcasts processing is not yet implemented. Coming soon!';
+  console.log('Processing Apple Podcast URL:', url);
+
+  // TODO: Implement Apple Podcasts processing
+  // This would call a backend endpoint similar to /process-youtube
+  // For now, just show a message
+
+  setTimeout(() => {
+    processingStatus.value = '';
+  }, 3000);
 };
 
 // File handling methods
@@ -199,8 +223,8 @@ const handleApiError = (error: any, context: string): string => {
 };
 
 // API processing methods with improved error handling
-const processYoutube = async () => {
-  if (!youtubeUrl.value.trim()) return;
+const processYoutubeUrl = async (url: string) => {
+  if (!url) return;
   
   if (!apiStatus.value.backend) {
     processingStatus.value = 'Backend API is not available. Please wait for services to start.';
@@ -234,7 +258,7 @@ const processYoutube = async () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        youtube_url: youtubeUrl.value
+        youtube_url: url
       }),
       signal: AbortSignal.timeout(600000) // 10 minute timeout
     });
@@ -314,20 +338,21 @@ const processAudio = async () => {
 
 const handleTranscriptionResult = (data: any) => {
   processingStatus.value = 'Processing complete!';
-  
+
   // Emit event to parent component (ChatApp) with the transcription data
   emit('transcription-complete', {
     transcription: data.transcription,
     summary: data.summary
   });
-  
+
   // Clear the form
-  youtubeUrl.value = '';
+  universalUrl.value = '';
+  detectedUrlType.value = '';
   selectedFile.value = null;
   if (fileInput.value) {
     fileInput.value.value = '';
   }
-  
+
   // Clear status after a delay
   setTimeout(() => {
     processingStatus.value = '';
@@ -395,6 +420,18 @@ const emit = defineEmits<{
 
 .url-input:focus {
   border-color: #1976d2;
+}
+
+.url-type-indicator {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background-color: #e3f2fd;
+  border: 1px solid #90caf9;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #1565c0;
+  text-align: center;
+  font-weight: 500;
 }
 
 .process-btn {
