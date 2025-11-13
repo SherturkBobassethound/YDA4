@@ -1,19 +1,27 @@
 <template>
   <div class="chat-container">
-    <!-- Initial State (when no transcription) -->
-    <div class="initial-state" v-if="!hasTranscription">
+    <!-- Welcome Screen (only for logged-out users) -->
+    <div class="initial-state" v-if="!hasTranscription && !isAuthenticated">
       <div class="welcome-card">
         <h3>Welcome to YODA</h3>
-        <p>Use the sidebar to upload audio files or process YouTube URLs to get started with your conversation.</p>
+        <p>Please log in to start chatting with your podcast content.</p>
         <div class="instructions">
           <h4>How to get started:</h4>
           <ol>
-            <li>Go to the sidebar on the left</li>
-            <li>Paste a YouTube URL or upload an audio file</li>
+            <li>Log in using the profile button</li>
+            <li>Paste a YouTube or Apple Podcasts URL in the sidebar</li>
             <li>Wait for processing to complete</li>
             <li>Start asking questions about the content!</li>
           </ol>
         </div>
+      </div>
+    </div>
+
+    <!-- Empty chat state (for logged-in users with no transcription) -->
+    <div class="initial-state" v-if="!hasTranscription && isAuthenticated">
+      <div class="welcome-card">
+        <h3>Ready to Chat</h3>
+        <p>Add a podcast or YouTube URL from the sidebar to start chatting.</p>
       </div>
     </div>
 
@@ -81,6 +89,8 @@
 
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from 'vue';
+import { useApi } from '../composables/useApi'
+import { useAuth } from '../composables/useAuth'
 
 interface Message {
   sender: 'user' | 'machine';
@@ -94,11 +104,10 @@ interface ModelInfo {
   description: string;
 }
 
-// Get API base URLs from environment or use defaults
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
-  (window.location.hostname === 'localhost' ? 'http://localhost:8000' : 'http://backend:8000');
+const { fetchWithAuth, API_BASE_URL } = useApi()
+const { isAuthenticated } = useAuth()
 
-const OLLAMA_API_URL = import.meta.env.VITE_OLLAMA_API_URL || 
+const OLLAMA_API_URL = import.meta.env.VITE_OLLAMA_API_URL ||
   (window.location.hostname === 'localhost' ? 'http://localhost:8001' : 'http://ollama-api:8001');
 
 // State
@@ -129,7 +138,7 @@ onMounted(async () => {
     const response = await fetch(`${OLLAMA_API_URL}/models`, {
       signal: AbortSignal.timeout(10000)
     });
-    
+
     if (response.ok) {
       const data = await response.json();
       if (data.models && Array.isArray(data.models)) {
@@ -139,7 +148,7 @@ onMounted(async () => {
           size: model.size ? formatBytes(model.size) : 'Unknown',
           description: getModelDescription(model.name)
         }));
-        
+
         if (installedModels.length > 0) {
           availableModels.value = installedModels;
           // Set first available model as default if current selection not available
@@ -183,11 +192,11 @@ const handleTranscriptionComplete = (data: { transcription: string; summary: str
   transcription.value = data.transcription;
   summary.value = data.summary;
   hasTranscription.value = true;
-  
+
   // Add welcome message
   messages.value.push({
     sender: 'machine',
-    text: `Great! I've processed your audio using ${selectedModel.value}. You can now ask me questions about the content. What would you like to know?`,
+    text: `Great! I've processed your content using ${selectedModel.value}. You can now ask me questions about it. What would you like to know?`,
     model: selectedModel.value
   });
 };
@@ -195,15 +204,15 @@ const handleTranscriptionComplete = (data: { transcription: string; summary: str
 const sendMessage = async () => {
   const txt = newMessage.value.trim();
   if (!txt) return;
-  
+
   messages.value.push({ sender: 'user', text: txt });
   newMessage.value = '';
   scrollToBottom();
-  
+
   isProcessing.value = true;
-  
+
   try {
-    const response = await fetch(`${API_BASE_URL}/chat`, {
+    const response = await fetchWithAuth(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -215,19 +224,19 @@ const sendMessage = async () => {
       }),
       signal: AbortSignal.timeout(120000) // 2 minute timeout for chat
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
       throw new Error(errorData.detail || 'Failed to get chat response');
     }
-    
+
     const data = await response.json();
     messages.value.push({
       sender: 'machine',
       text: data.response,
       model: selectedModel.value
     });
-    
+
   } catch (error: any) {
     console.error('Error sending message:', error);
     let errorMessage = 'Sorry, I encountered an error. Please try again.';

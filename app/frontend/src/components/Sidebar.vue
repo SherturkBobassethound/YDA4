@@ -2,71 +2,37 @@
   <div class="sidebar">
     <h2>Podcasts</h2>
     
-    <!-- YouTube URL Processing Section -->
+    <!-- Universal URL Processing Section -->
     <div class="processing-section">
-      <h3>Process YouTube URL</h3>
+      <h3>Process URL</h3>
       <div class="input-group">
         <input
           type="text"
-          v-model="youtubeUrl"
-          placeholder="Paste YouTube URL here..."
+          v-model="universalUrl"
+          placeholder="Paste YouTube or Apple Podcasts URL..."
           class="url-input"
+          @input="detectUrlType"
         />
-        <button @click="processYoutube" :disabled="isProcessing" class="process-btn">
+        <div v-if="detectedUrlType" class="url-type-indicator">
+          {{ detectedUrlType }}
+        </div>
+        <button @click="processUrl" :disabled="isProcessing || !universalUrl.trim()" class="process-btn">
           {{ isProcessing ? 'Processing...' : 'Process' }}
         </button>
       </div>
       <div v-if="processingStatus" class="status">{{ processingStatus }}</div>
     </div>
 
-    <div class="divider">OR</div>
-
-    <!-- File Upload Section -->
-    <div class="file-upload-section">
-      <h3>Upload Audio File</h3>
-      <div class="file-upload">
-        <input
-          type="file"
-          ref="fileInput"
-          @change="handleFileSelect"
-          accept="audio/*"
-          class="file-input"
-        />
-        <button @click="triggerFileSelect" class="upload-btn">
-          Choose Audio File
-        </button>
-        <span v-if="selectedFile" class="file-name">{{ selectedFile.name }}</span>
-        <button 
-          v-if="selectedFile" 
-          @click="processAudio" 
-          :disabled="isProcessing"
-          class="process-btn"
-        >
-          {{ isProcessing ? 'Processing...' : 'Process Audio' }}
-        </button>
-      </div>
-    </div>
-
-    <div class="divider">OR</div>
-
-    <!-- Podcast List Management -->
-    <div class="podcast-list-section">
-      <h3>Manage Podcast URLs</h3>
-      <ul>
+    <!-- Sources List -->
+    <div v-if="isAuthenticated" class="sources-section">
+      <h3>Your Sources</h3>
+      <ul v-if="sources.length > 0" class="sources-list">
         <li v-for="(source, index) in sources" :key="index" class="source-item">
-          <span class="source-text">{{ source }}</span>
-          <button @click="removeSource(index)" class="remove-btn">×</button>
+          <span class="source-text" :title="source.title">{{ source.title }}</span>
+          <button @click="confirmDelete(index)" class="remove-btn">×</button>
         </li>
       </ul>
-      <div class="add-source">
-        <input 
-          v-model="newSource" 
-          placeholder="Podcast URL" 
-          @keyup.enter="addSource"
-          class="source-input"
-        />
-        <button @click="addSource" class="add-btn">Add</button>
-      </div>
+      <p v-else class="no-sources">No sources added yet</p>
     </div>
 
     <!-- API Status Indicator -->
@@ -88,39 +54,30 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useApi } from '../composables/useApi'
+import { useAuth } from '../composables/useAuth'
 
-// Get API base URLs from environment or use container-aware defaults
-const getApiBaseUrl = (): string => {
-  // Check if running in browser (client-side)
-  if (typeof window !== 'undefined') {
-    // If hostname is localhost, we're in development
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:8000';
-    }
-    // Otherwise, use the current host (for production containers)
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
-  }
-  // Fallback for SSR
-  return 'http://backend:8000';
-};
+const { fetchWithAuth, API_BASE_URL } = useApi()
+const { isAuthenticated } = useAuth()
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || getApiBaseUrl();
-
-// Podcast list management
-const sources = ref<string[]>([
-  'Sample Podcast 1',
-  'Sample Podcast 2'
-]);
-const newSource = ref('');
-
-// YouTube processing state
-const youtubeUrl = ref('');
+// Universal URL processing state
+const universalUrl = ref('');
+const detectedUrlType = ref('');
 const isProcessing = ref(false);
 const processingStatus = ref('');
 
-// File upload state
-const selectedFile = ref<File | null>(null);
-const fileInput = ref<HTMLInputElement>();
+// Sources state
+interface Source {
+  id: string;
+  title: string;
+  url: string;
+  type: 'youtube' | 'podcast';
+  addedAt: string;
+}
+
+const sources = ref<Source[]>([]);
+const showDeleteModal = ref(false);
+const sourceToDelete = ref<number | null>(null);
 
 // API status tracking
 const apiStatus = ref({
@@ -128,11 +85,16 @@ const apiStatus = ref({
   ollama: false
 });
 
-// Check API status on mount
+// Check API status on mount and load sources
 onMounted(async () => {
   await checkApiStatus();
   // Check status every 30 seconds
   setInterval(checkApiStatus, 30000);
+
+  // Load user's sources if authenticated
+  if (isAuthenticated.value) {
+    await loadSources();
+  }
 });
 
 const checkApiStatus = async () => {
@@ -155,27 +117,98 @@ const checkApiStatus = async () => {
   }
 };
 
-// Podcast list methods
-const addSource = () => {
-  if (newSource.value.trim() !== '') {
-    sources.value.push(newSource.value.trim());
-    newSource.value = '';
+// URL detection logic
+const detectUrlType = () => {
+  const url = universalUrl.value.trim().toLowerCase();
+
+  if (!url) {
+    detectedUrlType.value = '';
+    return;
+  }
+
+  // Check for YouTube URLs
+  if (url.includes('youtube.com') || url.includes('youtu.be')) {
+    detectedUrlType.value = '🎥 YouTube Video';
+    return;
+  }
+
+  // Check for Apple Podcasts URLs
+  if (url.includes('podcasts.apple.com') || url.includes('itunes.apple.com')) {
+    detectedUrlType.value = '🎙️ Apple Podcast';
+    return;
+  }
+
+  // Unknown URL type
+  detectedUrlType.value = '❓ Unknown URL type';
+};
+
+// Universal URL processing router
+const processUrl = async () => {
+  const url = universalUrl.value.trim();
+  if (!url) return;
+
+  detectUrlType();
+
+  // Route based on detected URL type
+  if (detectedUrlType.value.includes('YouTube')) {
+    await processYoutubeUrl(url);
+  } else if (detectedUrlType.value.includes('Podcast')) {
+    await processPodcastUrl(url);
+  } else {
+    processingStatus.value = 'Unsupported URL type. Please use YouTube or Apple Podcasts URLs.';
+    setTimeout(() => {
+      processingStatus.value = '';
+    }, 3000);
   }
 };
 
-const removeSource = (index: number) => {
-  sources.value.splice(index, 1);
+// Process Apple Podcasts URL (placeholder for future implementation)
+const processPodcastUrl = async (url: string) => {
+  processingStatus.value = 'Apple Podcasts processing is not yet implemented. Coming soon!';
+  console.log('Processing Apple Podcast URL:', url);
+
+  // TODO: Implement Apple Podcasts processing
+  // This would call a backend endpoint similar to /process-youtube
+  // For now, just show a message
+
+  setTimeout(() => {
+    processingStatus.value = '';
+  }, 3000);
 };
 
-// File handling methods
-const triggerFileSelect = () => {
-  fileInput.value?.click();
+// Source management methods
+const loadSources = async () => {
+  // TODO: Implement API call to fetch user's sources from backend
+  // For now, sources will be populated as they are processed
+  console.log('Loading sources...');
 };
 
-const handleFileSelect = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  if (target.files && target.files[0]) {
-    selectedFile.value = target.files[0];
+const confirmDelete = (index: number) => {
+  const source = sources.value[index];
+  const confirmed = window.confirm(
+    `Are you sure you want to delete "${source.title}"?\n\nThis will permanently remove the transcription from your vector database.`
+  );
+
+  if (confirmed) {
+    deleteSource(index);
+  }
+};
+
+const deleteSource = async (index: number) => {
+  const source = sources.value[index];
+
+  try {
+    // TODO: Implement API call to delete from vector database
+    // const response = await fetchWithAuth(`${API_BASE_URL}/delete-source/${source.id}`, {
+    //   method: 'DELETE'
+    // });
+
+    // For now, just remove from local array
+    sources.value.splice(index, 1);
+    console.log('Source deleted:', source.title);
+  } catch (error) {
+    console.error('Failed to delete source:', error);
+    alert('Failed to delete source. Please try again.');
   }
 };
 
@@ -199,17 +232,22 @@ const handleApiError = (error: any, context: string): string => {
 };
 
 // API processing methods with improved error handling
-const processYoutube = async () => {
-  if (!youtubeUrl.value.trim()) return;
-  
+const processYoutubeUrl = async (url: string) => {
+  if (!url) return;
+
+  if (!isAuthenticated.value) {
+    processingStatus.value = 'Please log in to process content.';
+    return;
+  }
+
   if (!apiStatus.value.backend) {
     processingStatus.value = 'Backend API is not available. Please wait for services to start.';
     return;
   }
-  
+
   isProcessing.value = true;
   processingStatus.value = 'Starting YouTube processing...';
-  
+
   // Create progress simulation
   const progressSteps = [
     'Downloading YouTube video...',
@@ -218,7 +256,7 @@ const processYoutube = async () => {
     'Generating summary with Ollama...',
     'Almost done...'
   ];
-  
+
   let stepIndex = 0;
   const progressInterval = setInterval(() => {
     if (stepIndex < progressSteps.length - 1) {
@@ -226,29 +264,29 @@ const processYoutube = async () => {
       stepIndex++;
     }
   }, 15000); // Update every 15 seconds
-  
+
   try {
-    const response = await fetch(`${API_BASE_URL}/process-youtube`, {
+    const response = await fetchWithAuth(`${API_BASE_URL}/process-youtube`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        youtube_url: youtubeUrl.value
+        youtube_url: url
       }),
       signal: AbortSignal.timeout(600000) // 10 minute timeout
     });
-    
+
     clearInterval(progressInterval);
-    
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
       throw new Error(errorData.detail || 'Failed to process YouTube URL');
     }
-    
+
     const data = await response.json();
-    handleTranscriptionResult(data);
-    
+    handleTranscriptionResult(data, url);
+
   } catch (error: any) {
     clearInterval(progressInterval);
     processingStatus.value = handleApiError(error, 'YouTube processing');
@@ -257,77 +295,31 @@ const processYoutube = async () => {
   }
 };
 
-const processAudio = async () => {
-  if (!selectedFile.value) return;
-  
-  if (!apiStatus.value.backend) {
-    processingStatus.value = 'Backend API is not available. Please wait for services to start.';
-    return;
-  }
-  
-  isProcessing.value = true;
-  processingStatus.value = 'Starting audio processing...';
-  
-  // Create progress simulation for audio processing
-  const progressSteps = [
-    'Uploading audio file...',
-    'Transcribing with Whisper (this may take several minutes)...',
-    'Generating summary with Ollama...',
-    'Finalizing...'
-  ];
-  
-  let stepIndex = 0;
-  const progressInterval = setInterval(() => {
-    if (stepIndex < progressSteps.length - 1) {
-      processingStatus.value = progressSteps[stepIndex];
-      stepIndex++;
-    }
-  }, 10000); // Update every 10 seconds
-  
-  try {
-    const formData = new FormData();
-    formData.append('file', selectedFile.value);
-    
-    const response = await fetch(`${API_BASE_URL}/process-audio`, {
-      method: 'POST',
-      body: formData,
-      signal: AbortSignal.timeout(600000) // 10 minute timeout
-    });
-    
-    clearInterval(progressInterval);
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(errorData.detail || 'Failed to process audio file');
-    }
-    
-    const data = await response.json();
-    handleTranscriptionResult(data);
-    
-  } catch (error: any) {
-    clearInterval(progressInterval);
-    processingStatus.value = handleApiError(error, 'Audio processing');
-  } finally {
-    isProcessing.value = false;
-  }
-};
-
-const handleTranscriptionResult = (data: any) => {
+const handleTranscriptionResult = (data: any, sourceUrl: string = '') => {
   processingStatus.value = 'Processing complete!';
-  
+
+  // Add to sources list
+  if (sourceUrl) {
+    const newSource: Source = {
+      id: Date.now().toString(),
+      title: data.title || sourceUrl,
+      url: sourceUrl,
+      type: sourceUrl.includes('youtube') ? 'youtube' : 'podcast',
+      addedAt: new Date().toISOString()
+    };
+    sources.value.push(newSource);
+  }
+
   // Emit event to parent component (ChatApp) with the transcription data
   emit('transcription-complete', {
     transcription: data.transcription,
     summary: data.summary
   });
-  
+
   // Clear the form
-  youtubeUrl.value = '';
-  selectedFile.value = null;
-  if (fileInput.value) {
-    fileInput.value.value = '';
-  }
-  
+  universalUrl.value = '';
+  detectedUrlType.value = '';
+
   // Clear status after a delay
   setTimeout(() => {
     processingStatus.value = '';
@@ -395,6 +387,18 @@ const emit = defineEmits<{
 
 .url-input:focus {
   border-color: #1976d2;
+}
+
+.url-type-indicator {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background-color: #e3f2fd;
+  border: 1px solid #90caf9;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #1565c0;
+  text-align: center;
+  font-weight: 500;
 }
 
 .process-btn {
@@ -472,11 +476,23 @@ const emit = defineEmits<{
   font-size: 0.9rem;
 }
 
-/* Podcast List Styles */
-.sidebar ul {
+/* Sources Section Styles */
+.sources-section {
+  margin-bottom: 25px;
+}
+
+.sources-list {
   list-style: none;
   padding: 0;
-  margin: 0 0 15px 0;
+  margin: 0;
+}
+
+.no-sources {
+  text-align: center;
+  color: #999;
+  font-size: 0.9rem;
+  padding: 20px;
+  font-style: italic;
 }
 
 .source-item {
@@ -519,38 +535,6 @@ const emit = defineEmits<{
 
 .remove-btn:hover {
   background-color: #ff3742;
-}
-
-.add-source {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.source-input {
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  outline: none;
-}
-
-.source-input:focus {
-  border-color: #1976d2;
-}
-
-.add-btn {
-  padding: 10px;
-  background-color: #1976d2;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.add-btn:hover {
-  background-color: #1565c0;
 }
 
 /* API Status Styles */

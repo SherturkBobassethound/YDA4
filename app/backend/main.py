@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi import FastAPI, UploadFile, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 import yt_dlp
@@ -16,19 +16,23 @@ from services.text_splitter import TextSplitter
 from services.user_manager import UserIdentifier
 from services.pod_fetcher import PodFetcher
 from db.qdrant_db import QdrantDB
+from auth import get_current_user
 
 # Initialize components
 embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-username = "AverageJoe"
-collection_name = UserIdentifier.get_collection_name(username)
 
 # Get service URLs from environment variables with fallbacks for local development
 QDRANT_URL = os.getenv('QDRANT_URL', 'http://localhost:6333')
 OLLAMA_API_URL = os.getenv('OLLAMA_API_URL', 'http://localhost:8001')
 
 # Initialize services
-vector_db = QdrantDB(collection_name=collection_name, embedding_model=embedding_model, client_url=QDRANT_URL)
 text_splitter = TextSplitter(chunk_size=500, chunk_overlap=50)
+
+# Helper function to get user-specific vector DB
+def get_user_vector_db(user_id: str) -> QdrantDB:
+    """Get or create a QdrantDB instance for the specific user"""
+    collection_name = UserIdentifier.get_collection_name(user_id)
+    return QdrantDB(collection_name=collection_name, embedding_model=embedding_model, client_url=QDRANT_URL)
 
 # Load environment variables
 load_dotenv()
@@ -303,10 +307,10 @@ def generate_summary_ollama(text: str, model_name: str = "llama3.2:1b") -> str:
         logger.error(f"Error generating summary with Ollama: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
-def chat_with_ollama(message: str, context: str = None, model_name: str = "llama3.2:1b") -> str:
+def chat_with_ollama(message: str, vector_db: QdrantDB, context: str = None, model_name: str = "llama3.2:1b") -> str:
     """Chat with Ollama model through the API service, with enhanced context from vector DB"""
     logger.info(f"Starting chat with Ollama model: {model_name}")
-    
+
     # Enhanced context retrieval using vector database
     enhanced_context = context
     try:
@@ -363,7 +367,7 @@ def chat_with_ollama(message: str, context: str = None, model_name: str = "llama
         logger.error(f"Error in chat with Ollama: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate chat response: {str(e)}")
 
-def store_transcript_in_vector_db(transcript: str, source: str, url: str, username: str = "AverageJoe"):
+def store_transcript_in_vector_db(transcript: str, source: str, url: str, user_id: str, vector_db: QdrantDB):
     """
     Splits a transcript into chunks and inserts them into the Qdrant vector DB
     with metadata for retrieval.
@@ -380,7 +384,7 @@ def store_transcript_in_vector_db(transcript: str, source: str, url: str, userna
             "source": source,
             "url": url,
             "chunk_index": i,
-            "username": username,
+            "user_id": user_id,
             "timestamp": f"{i * 30}s"  # Approximate timestamp for chunks
         })
 
@@ -402,23 +406,26 @@ async def get_models():
         raise HTTPException(status_code=503, detail="Could not fetch available models")
 
 @app.post("/process-youtube")
-async def process_youtube(request: TranscriptionRequest):
+async def process_youtube(request: TranscriptionRequest, user: dict = Depends(get_current_user)):
     """Process YouTube video: download audio, transcribe, and summarize"""
     if not request.youtube_url:
         raise HTTPException(status_code=400, detail="YouTube URL is required")
-    
-    logger.info(f"Processing YouTube URL: {request.youtube_url}")
+
+    logger.info(f"Processing YouTube URL: {request.youtube_url} for user: {user['id']}")
     audio_file = None
-    
+
+    # Get user-specific vector database
+    vector_db = get_user_vector_db(user['id'])
+
     try:
         # Download audio from YouTube
         audio_file = download_youtube_audio(request.youtube_url)
-        
+
         # Transcribe audio
         transcription = transcribe_audio(audio_file)
 
         # Store transcript in vector database
-        store_transcript_in_vector_db(transcription, source="youtube", url=request.youtube_url, username=username)
+        store_transcript_in_vector_db(transcription, source="youtube", url=request.youtube_url, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
         
         # Generate summary using Ollama
@@ -442,14 +449,17 @@ async def process_youtube(request: TranscriptionRequest):
                 logger.warning(f"Failed to clean up temporary file: {str(e)}")
 
 @app.post("/process-audio")
-async def process_audio(file: UploadFile):
+async def process_audio(file: UploadFile, user: dict = Depends(get_current_user)):
     """Process uploaded audio file: transcribe and summarize"""
     if not file:
         raise HTTPException(status_code=400, detail="Audio file is required")
-    
-    logger.info(f"Processing uploaded audio file: {file.filename}")
+
+    logger.info(f"Processing uploaded audio file: {file.filename} for user: {user['id']}")
     temp_path = None
-    
+
+    # Get user-specific vector database
+    vector_db = get_user_vector_db(user['id'])
+
     try:
         # Save uploaded file to temporary location
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as temp_file:
@@ -457,12 +467,12 @@ async def process_audio(file: UploadFile):
             temp_file.write(content)
             temp_path = temp_file.name
             logger.info(f"Saved temporary file: {temp_path}")
-        
+
         # Transcribe audio
         transcription = transcribe_audio(temp_path)
-        
+
         # Store transcript in vector database
-        store_transcript_in_vector_db(transcription, source="audio_upload", url=file.filename, username=username)
+        store_transcript_in_vector_db(transcription, source="audio_upload", url=file.filename, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
         
         # Generate summary using Ollama
@@ -486,14 +496,17 @@ async def process_audio(file: UploadFile):
                 logger.warning(f"Failed to clean up temporary file: {str(e)}")
     
 @app.post("/process-podcast")
-async def process_podcast(request: TranscriptionRequest):
+async def process_podcast(request: TranscriptionRequest, user: dict = Depends(get_current_user)):
     """Process podcast: download episode (audio or transcript), transcribe if needed, and summarize"""
     if not request.podcast_url:
         raise HTTPException(status_code=400, detail="Podcast URL is required")
-    
-    logger.info(f"Processing podcast URL: {request.podcast_url}")
+
+    logger.info(f"Processing podcast URL: {request.podcast_url} for user: {user['id']}")
     fetcher = PodFetcher()
     file_path = None
+
+    # Get user-specific vector database
+    vector_db = get_user_vector_db(user['id'])
 
     try:
         # Download podcast file
@@ -511,7 +524,7 @@ async def process_podcast(request: TranscriptionRequest):
             logger.info("Audio file transcribed successfully")
 
         # Store transcript in vector database
-        store_transcript_in_vector_db(transcription, source="podcast", url=request.podcast_url, username=username)
+        store_transcript_in_vector_db(transcription, source="podcast", url=request.podcast_url, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
 
         # Generate summary
@@ -536,37 +549,43 @@ async def process_podcast(request: TranscriptionRequest):
                 logger.warning(f"Failed to clean up file: {str(e)}")
     
 @app.post("/process-url")
-async def process_url(request: URLRequest):
+async def process_url(request: URLRequest, user: dict = Depends(get_current_user)):
     url = request.url.strip()
 
     if "youtube.com" in url or "youtu.be" in url:
         logger.info("Detected YouTube URL")
         transcription_request = TranscriptionRequest(youtube_url=url)
-        return await process_youtube(transcription_request)
-    
+        return await process_youtube(transcription_request, user)
+
     elif "podcasts.apple.com" in url:
         logger.info("Detected Apple Podcast URL")
         transcription_request = TranscriptionRequest(podcast_url=url)
-        return await process_podcast(transcription_request)
-    
+        return await process_podcast(transcription_request, user)
+
     else:
         logger.warning("Unrecognized URL format")
         raise HTTPException(status_code=400, detail="Unsupported URL type")
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user: dict = Depends(get_current_user)):
     """Enhanced chat endpoint with vector database integration"""
     try:
-        response = chat_with_ollama(request.message, request.context, request.model)
+        # Get user-specific vector database
+        vector_db = get_user_vector_db(user['id'])
+
+        response = chat_with_ollama(request.message, vector_db, request.context, request.model)
         return {"response": response}
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/search")
-async def search_transcripts(query: str, k: int = 5):
+async def search_transcripts(query: str, k: int = 5, user: dict = Depends(get_current_user)):
     """Search through stored transcripts using vector similarity"""
     try:
+        # Get user-specific vector database
+        vector_db = get_user_vector_db(user['id'])
+
         results = vector_db.search(query, k=k)
         formatted_results = []
         for doc in results:

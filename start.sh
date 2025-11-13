@@ -2,10 +2,28 @@
 
 # YODA Application Startup Script - Robust Version
 # This script handles health check issues and ensures all services start properly
+#
+# Usage:
+#   ./start.sh           - Normal start with health checks (uses Docker cache)
+#   ./start.sh --dev     - Development mode (rebuilds code services without cache)
+#   ./start.sh --rebuild - Full rebuild from scratch (all services, no cache)
 
 set -e  # Exit on any error
 
-echo "🚀 Starting YODA Application..."
+# Detect mode
+DEV_MODE=false
+REBUILD_MODE=false
+
+if [ "$1" = "--dev" ]; then
+    DEV_MODE=true
+    echo "🔧 Starting YODA Application in DEVELOPMENT MODE..."
+    echo "   (Rebuilding code services without cache to pick up latest changes)"
+elif [ "$1" = "--rebuild" ]; then
+    REBUILD_MODE=true
+    echo "🔄 Starting YODA Application with FULL REBUILD..."
+else
+    echo "🚀 Starting YODA Application..."
+fi
 echo "=================================="
 
 # Check if Docker is running
@@ -121,10 +139,13 @@ docker-compose -f "$COMPOSE_FILE" down --remove-orphans > /dev/null 2>&1 || true
 echo "🧹 Cleaning up orphaned resources..."
 docker system prune -f > /dev/null 2>&1 || true
 
-# Build images if requested or if they don't exist
-if [ "$1" = "--rebuild" ]; then
-    echo "🔄 Rebuilding all images from scratch..."
+# Build images based on mode
+if [ "$REBUILD_MODE" = true ]; then
+    echo "🔄 Rebuilding all images from scratch (no cache)..."
     docker-compose -f "$COMPOSE_FILE" build --no-cache
+elif [ "$DEV_MODE" = true ]; then
+    echo "🏗️  Rebuilding code services without cache (backend, frontend, ollama-api)..."
+    docker-compose -f "$COMPOSE_FILE" build --no-cache backend frontend ollama-api
 else
     echo "🏗️  Building images (if needed)..."
     docker-compose -f "$COMPOSE_FILE" build
@@ -151,47 +172,55 @@ services:
     # Remove health check dependency
 EOF
 
-# Start services in stages to avoid dependency issues
-echo "🚀 Starting core services..."
+# Start services based on mode
+if [ "$DEV_MODE" = true ]; then
+    echo "🚀 Starting all services (quick mode)..."
+    docker-compose -f "$COMPOSE_FILE" up -d
+    echo "⏳ Waiting 30 seconds for services to initialize..."
+    sleep 30
+else
+    # Start services in stages to avoid dependency issues
+    echo "🚀 Starting core services..."
 
-# Stage 1: Start base services (Qdrant and Ollama)
-echo "📊 Starting Qdrant (Vector Database)..."
-docker-compose -f "$COMPOSE_FILE" up -d qdrant
-sleep 10
+    # Stage 1: Start base services (Qdrant and Ollama)
+    echo "📊 Starting Qdrant (Vector Database)..."
+    docker-compose -f "$COMPOSE_FILE" up -d qdrant
+    sleep 10
 
-echo "🤖 Starting Ollama (LLM Service)..."
-docker-compose -f "$COMPOSE_FILE" up -d ollama
-sleep 15
+    echo "🤖 Starting Ollama (LLM Service)..."
+    docker-compose -f "$COMPOSE_FILE" up -d ollama
+    sleep 15
 
-# Stage 2: Check core services
-echo ""
-echo "🔍 Checking core services..."
-check_qdrant_health
-check_service_response "Ollama" "http://localhost:11434/api/version"
+    # Stage 2: Check core services
+    echo ""
+    echo "🔍 Checking core services..."
+    check_qdrant_health
+    check_service_response "Ollama" "http://localhost:11434/api/version"
 
-# Stage 3: Start API services (force start without health check dependencies)
-echo ""
-echo "🔌 Starting API services..."
-docker-compose -f "$COMPOSE_FILE" up -d --no-deps ollama-api
-sleep 15
+    # Stage 3: Start API services (force start without health check dependencies)
+    echo ""
+    echo "🔌 Starting API services..."
+    docker-compose -f "$COMPOSE_FILE" up -d --no-deps ollama-api
+    sleep 15
 
-check_service_response "Ollama API" "http://localhost:8001/"
+    check_service_response "Ollama API" "http://localhost:8001/"
 
-# Stage 4: Start backend (force start without health check dependencies)
-echo ""
-echo "⚙️  Starting Backend API..."
-docker-compose -f "$COMPOSE_FILE" up -d --no-deps backend
-sleep 20
+    # Stage 4: Start backend (force start without health check dependencies)
+    echo ""
+    echo "⚙️  Starting Backend API..."
+    docker-compose -f "$COMPOSE_FILE" up -d --no-deps backend
+    sleep 20
 
-check_service_response "Backend API" "http://localhost:8000/health"
+    check_service_response "Backend API" "http://localhost:8000/health"
 
-# Stage 5: Start frontend (force start without health check dependencies)
-echo ""
-echo "🌐 Starting Frontend..."
-docker-compose -f "$COMPOSE_FILE" up -d --no-deps frontend
-sleep 10
+    # Stage 5: Start frontend (force start without health check dependencies)
+    echo ""
+    echo "🌐 Starting Frontend..."
+    docker-compose -f "$COMPOSE_FILE" up -d --no-deps frontend
+    sleep 10
 
-check_service_response "Frontend" "http://localhost/health"
+    check_service_response "Frontend" "http://localhost/health"
+fi
 
 # Clean up temporary override
 rm -f docker-compose.override.yml
@@ -271,39 +300,43 @@ else
     echo "   If issues persist, check logs with: docker-compose logs [service_name]"
 fi
 
-echo ""
-echo "🤖 Ollama Models:"
-if docker exec ollama_service ollama list 2>/dev/null | grep -q "NAME"; then
-    docker exec ollama_service ollama list 2>/dev/null
-else
-    echo "   No models installed yet"
+if [ "$DEV_MODE" = false ]; then
     echo ""
-    read -p "🤖 Would you like to install the default models now? (y/N): " -n 1 -r
-    echo ""
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "📥 Installing llama3.2:1b (lightweight model)..."
-        if docker exec ollama_service ollama pull llama3.2:1b 2>/dev/null; then
-            echo "✅ llama3.2:1b installed successfully!"
-        else
-            echo "❌ Failed to install llama3.2:1b"
-        fi
-        
-        echo "📥 Installing llama3.2:3b (more capable model)..."
-        if docker exec ollama_service ollama pull llama3.2:3b 2>/dev/null; then
-            echo "✅ llama3.2:3b installed successfully!"
-        else
-            echo "❌ Failed to install llama3.2:3b"
+    echo "🤖 Ollama Models:"
+    if docker exec ollama_service ollama list 2>/dev/null | grep -q "NAME"; then
+        docker exec ollama_service ollama list 2>/dev/null
+    else
+        echo "   No models installed yet"
+        echo ""
+        read -p "🤖 Would you like to install the default models now? (y/N): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "📥 Installing llama3.2:1b (lightweight model)..."
+            if docker exec ollama_service ollama pull llama3.2:1b 2>/dev/null; then
+                echo "✅ llama3.2:1b installed successfully!"
+            else
+                echo "❌ Failed to install llama3.2:1b"
+            fi
+
+            echo "📥 Installing llama3.2:3b (more capable model)..."
+            if docker exec ollama_service ollama pull llama3.2:3b 2>/dev/null; then
+                echo "✅ llama3.2:3b installed successfully!"
+            else
+                echo "❌ Failed to install llama3.2:3b"
+            fi
         fi
     fi
 fi
 
 echo ""
 echo "📚 Useful Commands:"
-echo "   View all logs:    docker-compose logs -f"
-echo "   View service log: docker-compose logs -f [service_name]"
-echo "   Stop all:         docker-compose down"
-echo "   Restart service:  docker-compose restart [service_name]"
-echo "   Rebuild & start:  ./start.sh --rebuild"
+echo "   View all logs:      docker-compose logs -f"
+echo "   View service log:   docker-compose logs -f [service_name]"
+echo "   Stop all:           ./stop.sh"
+echo "   Restart service:    docker-compose restart [service_name]"
+echo "   Quick deploy:       ./stop.sh && ./start.sh --dev"
+echo "   Full rebuild:       ./start.sh --rebuild"
+echo "   After git pull:     ./stop.sh && ./start.sh --dev  (rebuilds without cache)"
 echo ""
 
 # Show resource usage
