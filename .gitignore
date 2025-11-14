@@ -172,6 +172,8 @@ ollama_data/
 
 # IDE and Editor files
 .vscode/
+.claude/
+.claude/*
 .idea/
 *.swp
 *.swo
