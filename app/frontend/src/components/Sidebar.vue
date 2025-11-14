@@ -162,18 +162,69 @@ const processUrl = async () => {
   }
 };
 
-// Process Apple Podcasts URL (placeholder for future implementation)
+// Process Apple Podcasts URL
 const processPodcastUrl = async (url: string) => {
-  processingStatus.value = 'Apple Podcasts processing is not yet implemented. Coming soon!';
-  console.log('Processing Apple Podcast URL:', url);
+  if (!url) return;
 
-  // TODO: Implement Apple Podcasts processing
-  // This would call a backend endpoint similar to /process-youtube
-  // For now, just show a message
+  if (!isAuthenticated.value) {
+    processingStatus.value = 'Please log in to process content.';
+    return;
+  }
 
-  setTimeout(() => {
-    processingStatus.value = '';
-  }, 3000);
+  if (!apiStatus.value.backend) {
+    processingStatus.value = 'Backend API is not available. Please wait for services to start.';
+    return;
+  }
+
+  isProcessing.value = true;
+  processingStatus.value = 'Starting Apple Podcast processing...';
+
+  // Create progress simulation
+  const progressSteps = [
+    'Fetching podcast metadata...',
+    'Attempting to scrape transcript...',
+    'Downloading podcast audio (if needed)...',
+    'Transcribing with Whisper (this may take several minutes)...',
+    'Generating summary with Ollama...',
+    'Almost done...'
+  ];
+
+  let stepIndex = 0;
+  const progressInterval = setInterval(() => {
+    if (stepIndex < progressSteps.length - 1) {
+      processingStatus.value = progressSteps[stepIndex];
+      stepIndex++;
+    }
+  }, 15000); // Update every 15 seconds
+
+  try {
+    const response = await fetchWithAuth(`${API_BASE_URL}/process-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        url: url
+      }),
+      signal: AbortSignal.timeout(600000) // 10 minute timeout
+    });
+
+    clearInterval(progressInterval);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new Error(errorData.detail || 'Failed to process Apple Podcast URL');
+    }
+
+    const data = await response.json();
+    handleTranscriptionResult(data, url);
+
+  } catch (error: any) {
+    clearInterval(progressInterval);
+    processingStatus.value = handleApiError(error, 'Apple Podcast processing');
+  } finally {
+    isProcessing.value = false;
+  }
 };
 
 // Source management methods
