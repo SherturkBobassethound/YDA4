@@ -46,8 +46,9 @@ app = FastAPI()
 # Improved CORS configuration
 origins = [
     "http://localhost",
-    "http://localhost:80", 
+    "http://localhost:80",
     "http://localhost:3000",
+    "http://localhost:5173",  # Vite dev server
     "http://frontend",  # Docker service name
     "http://frontend:80"
 ]
@@ -617,7 +618,7 @@ async def health_check():
     
     try:
         # Check if Qdrant is running
-        response = requests.get(f"{QDRANT_URL}/health", timeout=5)
+        response = requests.get(f"{QDRANT_URL}/", timeout=5)
         status["qdrant"] = "connected" if response.status_code == 200 else "disconnected"
     except Exception as e:
         logger.warning(f"Qdrant health check failed: {str(e)}")
