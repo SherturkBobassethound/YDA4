@@ -85,8 +85,12 @@ class ChatRequest(BaseModel):
     context: Optional[str] = None  # For passing transcription context
     model: Optional[str] = "llama3.2:1b"  # Default model
 
-def download_youtube_audio(url: str) -> str:
-    """Download audio from YouTube video and save to temporary file"""
+def download_youtube_audio(url: str) -> dict:
+    """Download audio from YouTube video and save to temporary file
+
+    Returns:
+        dict: {'audio_file': str, 'title': str}
+    """
     logger.info(f"Starting download of YouTube video: {url}")
     
     # First, try to get available formats to make an informed decision
@@ -149,8 +153,9 @@ def download_youtube_audio(url: str) -> str:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             audio_file = f"{info['id']}.mp3"
+            title = info.get('title', 'Unknown Title')
             logger.info(f"Successfully downloaded audio: {audio_file}")
-            return audio_file
+            return {'audio_file': audio_file, 'title': title}
     except Exception as e:
         logger.error(f"Primary download failed: {str(e)}")
         logger.info("Primary download failed, attempting fallback...")
@@ -187,8 +192,9 @@ def download_youtube_audio(url: str) -> str:
             with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 audio_file = f"{info['id']}.mp3"
+                title = info.get('title', 'Unknown Title')
                 logger.info(f"Successfully downloaded audio with fallback: {audio_file}")
-                return audio_file
+                return {'audio_file': audio_file, 'title': title}
         except Exception as fallback_error:
             logger.error(f"Fallback download also failed: {str(fallback_error)}")
             
@@ -223,8 +229,9 @@ def download_youtube_audio(url: str) -> str:
                 with yt_dlp.YoutubeDL(video_fallback_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                     audio_file = f"{info['id']}.mp3"
+                    title = info.get('title', 'Unknown Title')
                     logger.info(f"Successfully downloaded audio with video fallback: {audio_file}")
-                    return audio_file
+                    return {'audio_file': audio_file, 'title': title}
             except Exception as video_fallback_error:
                 logger.error(f"Video fallback also failed: {str(video_fallback_error)}")
                 
@@ -258,8 +265,9 @@ def download_youtube_audio(url: str) -> str:
                     with yt_dlp.YoutubeDL(final_fallback_opts) as ydl:
                         info = ydl.extract_info(url, download=True)
                         audio_file = f"{info['id']}.mp3"
+                        title = info.get('title', 'Unknown Title')
                         logger.info(f"Successfully downloaded audio with final fallback: {audio_file}")
-                        return audio_file
+                        return {'audio_file': audio_file, 'title': title}
                 except Exception as final_error:
                     logger.error(f"Final fallback also failed: {str(final_error)}")
                     raise HTTPException(status_code=400, detail=f"Failed to download YouTube video after all attempts. Primary error: {str(e)}. Fallback error: {str(fallback_error)}. Video fallback error: {str(video_fallback_error)}. Final fallback error: {str(final_error)}")
@@ -414,13 +422,16 @@ async def process_youtube(request: TranscriptionRequest, user: dict = Depends(ge
 
     logger.info(f"Processing YouTube URL: {request.youtube_url} for user: {user['id']}")
     audio_file = None
+    video_title = "Unknown Title"
 
     # Get user-specific vector database
     vector_db = get_user_vector_db(user['id'])
 
     try:
         # Download audio from YouTube
-        audio_file = download_youtube_audio(request.youtube_url)
+        download_result = download_youtube_audio(request.youtube_url)
+        audio_file = download_result['audio_file']
+        video_title = download_result['title']
 
         # Transcribe audio
         transcription = transcribe_audio(audio_file)
@@ -428,11 +439,12 @@ async def process_youtube(request: TranscriptionRequest, user: dict = Depends(ge
         # Store transcript in vector database
         store_transcript_in_vector_db(transcription, source="youtube", url=request.youtube_url, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
-        
+
         # Generate summary using Ollama
         summary = generate_summary_ollama(transcription)
-        
+
         return {
+            "title": video_title,
             "transcription": transcription,
             "summary": summary
         }
@@ -513,6 +525,15 @@ async def process_podcast(request: TranscriptionRequest, user: dict = Depends(ge
         # Download podcast file
         info = fetcher.fetch(request.podcast_url)
         file_path = info["filepath"]
+        episode_title = info.get("episode_title", "Unknown Podcast")
+        podcast_name = info.get("podcast_name", "")
+
+        # Combine podcast name and episode title for display
+        if podcast_name and episode_title:
+            full_title = f"{podcast_name}: {episode_title}"
+        else:
+            full_title = episode_title or podcast_name or "Unknown Podcast"
+
         logger.info(f"Downloaded {info['download_type']} to {file_path}")
 
         # Handle transcription
@@ -533,6 +554,7 @@ async def process_podcast(request: TranscriptionRequest, user: dict = Depends(ge
         logger.info("Summary generated successfully")
 
         return {
+            "title": full_title,
             "transcription": transcription,
             "summary": summary
         }
