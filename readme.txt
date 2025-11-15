@@ -15,8 +15,42 @@ YODA (Your Own Data Assistant) is now fully containerized! This setup includes:
 - Docker and Docker Compose installed
 - At least 8GB of RAM (for running Ollama models)
 - 10GB+ free disk space (for Docker images and models)
+- **Supabase account** (free tier available at https://supabase.com)
 
-### 1. Clone and Setup
+### 1. Configure Supabase
+
+YODA uses Supabase for user authentication and data storage. You'll need to:
+
+1. **Create a Supabase project** at https://supabase.com
+2. **Run the database migration**:
+   - Go to your Supabase project dashboard
+   - Navigate to SQL Editor
+   - Copy and run the SQL from `app/backend/migrations/001_create_sources_table.sql`
+3. **Get your credentials**:
+   - Go to Project Settings > API
+   - Copy your Project URL and anon/public key
+   - Copy your service_role key (keep this secret!)
+4. **Create a .env file** in the project root:
+
+```bash
+cp .env.example .env
+```
+
+5. **Edit .env** and add your Supabase credentials:
+
+```env
+SUPABASE_URL=https://xxxxxxxxxxxxx.supabase.co
+SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_SERVICE_KEY=your-service-role-key-here
+
+# The VITE_ prefixed vars are auto-populated from above
+VITE_SUPABASE_URL=${SUPABASE_URL}
+VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+```
+
+**Important**: Never commit your `.env` file to git! It's already in `.gitignore`.
+
+### 2. Clone and Setup
 
 ```bash
 # Make the startup script executable
@@ -24,7 +58,7 @@ chmod +x start.sh
 chmod +x stop.sh
 ```
 
-### 2. Start Everything
+### 3. Start Everything
 
 ```bash
 # This will build and start all containers
@@ -38,7 +72,7 @@ The script will:
 - Optionally download default Ollama models
 - Show you all the URLs and next steps
 
-### 3. Access the Application
+### 4. Access the Application
 
 Once started, visit: **http://localhost**
 
