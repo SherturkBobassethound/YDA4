@@ -68,7 +68,8 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
         return {
             "id": user_id,
             "email": email,
-            "payload": payload
+            "payload": payload,
+            "token": token  # Include the token for use with Supabase client
         }
 
     except ValueError:

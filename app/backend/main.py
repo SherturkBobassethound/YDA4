@@ -15,7 +15,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from services.text_splitter import TextSplitter
 from services.user_manager import UserIdentifier
 from services.pod_fetcher import PodFetcher
-from services.supabase_client import supabase
+from services.supabase_client import supabase, get_user_supabase_client
 from db.qdrant_db import QdrantDB
 from auth import get_current_user
 
@@ -449,9 +449,10 @@ async def process_youtube(request: TranscriptionRequest, user: dict = Depends(ge
         # Generate summary using Ollama
         summary = generate_summary_ollama(transcription)
 
-        # Save source to database
+        # Save source to database using user's token for RLS
         try:
-            supabase.table('sources').insert({
+            user_supabase = get_user_supabase_client(user['token'])
+            user_supabase.table('sources').insert({
                 "user_id": user['id'],
                 "title": video_title,
                 "url": request.youtube_url,
@@ -572,9 +573,10 @@ async def process_podcast(request: TranscriptionRequest, user: dict = Depends(ge
         summary = generate_summary_ollama(transcription)
         logger.info("Summary generated successfully")
 
-        # Save source to database
+        # Save source to database using user's token for RLS
         try:
-            supabase.table('sources').insert({
+            user_supabase = get_user_supabase_client(user['token'])
+            user_supabase.table('sources').insert({
                 "user_id": user['id'],
                 "title": full_title,
                 "url": request.podcast_url,
@@ -657,7 +659,8 @@ async def search_transcripts(query: str, k: int = 5, user: dict = Depends(get_cu
 async def get_sources(user: dict = Depends(get_current_user)):
     """Get all sources for the authenticated user"""
     try:
-        result = supabase.table('sources').select('*').eq('user_id', user['id']).order('created_at', desc=True).execute()
+        user_supabase = get_user_supabase_client(user['token'])
+        result = user_supabase.table('sources').select('*').eq('user_id', user['id']).order('created_at', desc=True).execute()
 
         # Format the response to match frontend expectations
         sources = []
@@ -679,7 +682,8 @@ async def get_sources(user: dict = Depends(get_current_user)):
 async def create_source(source: SourceCreate, user: dict = Depends(get_current_user)):
     """Create a new source for the authenticated user"""
     try:
-        result = supabase.table('sources').insert({
+        user_supabase = get_user_supabase_client(user['token'])
+        result = user_supabase.table('sources').insert({
             "user_id": user['id'],
             "title": source.title,
             "url": source.url,
@@ -706,8 +710,11 @@ async def create_source(source: SourceCreate, user: dict = Depends(get_current_u
 async def delete_source(source_id: str, user: dict = Depends(get_current_user)):
     """Delete a source and its associated vector data"""
     try:
+        # Use user's token for RLS
+        user_supabase = get_user_supabase_client(user['token'])
+        
         # First, verify the source belongs to the user
-        result = supabase.table('sources').select('*').eq('id', source_id).eq('user_id', user['id']).execute()
+        result = user_supabase.table('sources').select('*').eq('id', source_id).eq('user_id', user['id']).execute()
 
         if not result.data:
             raise HTTPException(status_code=404, detail="Source not found")
@@ -715,7 +722,7 @@ async def delete_source(source_id: str, user: dict = Depends(get_current_user)):
         source = result.data[0]
 
         # Delete from Supabase
-        supabase.table('sources').delete().eq('id', source_id).eq('user_id', user['id']).execute()
+        user_supabase.table('sources').delete().eq('id', source_id).eq('user_id', user['id']).execute()
 
         # Delete from Qdrant vector database
         # Get user-specific vector database
