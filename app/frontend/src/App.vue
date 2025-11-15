@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import ChatApp from './components/ChatApp.vue'
 import ProfileButton from './components/ProfileButton.vue'
+import { useAuth } from './composables/useAuth'
+
+const { initAuth } = useAuth()
 
 // Reference to ChatApp component to call its methods
 const chatAppRef = ref<InstanceType<typeof ChatApp>>()
+
+// Initialize authentication on app mount
+onMounted(async () => {
+  await initAuth()
+})
 
 // Handle transcription completion from Sidebar
 const handleTranscriptionComplete = (data: { transcription: string; summary: string }) => {

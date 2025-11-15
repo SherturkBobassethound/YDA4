@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 
@@ -94,6 +94,17 @@ onMounted(async () => {
   // Load user's sources if authenticated
   if (isAuthenticated.value) {
     await loadSources();
+  }
+});
+
+// Watch for authentication changes and load sources when user logs in
+watch(isAuthenticated, async (newValue, oldValue) => {
+  if (newValue && !oldValue) {
+    // User just logged in
+    await loadSources();
+  } else if (!newValue && oldValue) {
+    // User just logged out
+    sources.value = [];
   }
 });
 
@@ -229,9 +240,20 @@ const processPodcastUrl = async (url: string) => {
 
 // Source management methods
 const loadSources = async () => {
-  // TODO: Implement API call to fetch user's sources from backend
-  // For now, sources will be populated as they are processed
-  console.log('Loading sources...');
+  try {
+    const response = await fetchWithAuth(`${API_BASE_URL}/sources`);
+
+    if (!response.ok) {
+      throw new Error(`Failed to load sources: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    sources.value = data.sources || [];
+    console.log('Sources loaded:', sources.value.length);
+  } catch (error) {
+    console.error('Failed to load sources:', error);
+    // Don't show an alert on load failure - just log it
+  }
 };
 
 const confirmDelete = (index: number) => {
@@ -249,12 +271,15 @@ const deleteSource = async (index: number) => {
   const source = sources.value[index];
 
   try {
-    // TODO: Implement API call to delete from vector database
-    // const response = await fetchWithAuth(`${API_BASE_URL}/delete-source/${source.id}`, {
-    //   method: 'DELETE'
-    // });
+    const response = await fetchWithAuth(`${API_BASE_URL}/sources/${source.id}`, {
+      method: 'DELETE'
+    });
 
-    // For now, just remove from local array
+    if (!response.ok) {
+      throw new Error(`Failed to delete source: ${response.statusText}`);
+    }
+
+    // Remove from local array only after successful backend deletion
     sources.value.splice(index, 1);
     console.log('Source deleted:', source.title);
   } catch (error) {
@@ -346,19 +371,13 @@ const processYoutubeUrl = async (url: string) => {
   }
 };
 
-const handleTranscriptionResult = (data: any, sourceUrl: string = '') => {
+const handleTranscriptionResult = async (data: any, sourceUrl: string = '') => {
   processingStatus.value = 'Processing complete!';
 
-  // Add to sources list
-  if (sourceUrl) {
-    const newSource: Source = {
-      id: Date.now().toString(),
-      title: data.title || sourceUrl,
-      url: sourceUrl,
-      type: sourceUrl.includes('youtube') ? 'youtube' : 'podcast',
-      addedAt: new Date().toISOString()
-    };
-    sources.value.push(newSource);
+  // Reload sources from backend to get the saved source with correct ID
+  // The backend automatically saves sources when processing completes
+  if (sourceUrl && isAuthenticated.value) {
+    await loadSources();
   }
 
   // Emit event to parent component (ChatApp) with the transcription data
