@@ -26,10 +26,13 @@ YODA uses Supabase for user authentication and data storage. You'll need to:
    - Go to your Supabase project dashboard
    - Navigate to SQL Editor
    - Copy and run the SQL from `app/backend/migrations/001_create_sources_table.sql`
-3. **Get your credentials**:
+3. **Get your credentials** from Supabase Dashboard:
    - Go to Project Settings > API
-   - Copy your Project URL and anon/public key
-   - Copy your service_role key (keep this secret!)
+   - Copy these four values:
+     - **Project URL** (e.g., https://xxxxxxxxxxxxx.supabase.co)
+     - **anon/public key** (under "Project API keys")
+     - **service_role key** (under "Project API keys" - keep this secret!)
+     - **JWT Secret** (at the bottom under "JWT Settings" - NOT the same as service key!)
 4. **Create a .env file** in the project root:
 
 ```bash
@@ -39,14 +42,21 @@ cp .env.example .env
 5. **Edit .env** and add your Supabase credentials:
 
 ```env
+# Copy these from your Supabase project settings
 SUPABASE_URL=https://xxxxxxxxxxxxx.supabase.co
 SUPABASE_ANON_KEY=your-anon-key-here
+SUPABASE_JWT_SECRET=your-jwt-secret-here
 SUPABASE_SERVICE_KEY=your-service-role-key-here
 
 # The VITE_ prefixed vars are auto-populated from above
 VITE_SUPABASE_URL=${SUPABASE_URL}
 VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+
+# Environment
+ENVIRONMENT=development
 ```
+
+**Common Issue**: Make sure to copy the **JWT Secret** (found at the bottom of the API page), NOT the service key. They are different values!
 
 **Important**: Never commit your `.env` file to git! It's already in `.gitignore`.
 

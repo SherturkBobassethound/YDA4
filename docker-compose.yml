@@ -78,6 +78,8 @@ services:
       - OLLAMA_API_URL=http://ollama-api:8001
       - ENVIRONMENT=production
       - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
