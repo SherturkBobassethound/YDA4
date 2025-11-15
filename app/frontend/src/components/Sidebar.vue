@@ -76,8 +76,6 @@ interface Source {
 }
 
 const sources = ref<Source[]>([]);
-const showDeleteModal = ref(false);
-const sourceToDelete = ref<number | null>(null);
 
 // API status tracking
 const apiStatus = ref({
