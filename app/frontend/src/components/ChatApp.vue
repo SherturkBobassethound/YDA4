@@ -91,6 +91,7 @@
 import { ref, nextTick, onMounted } from 'vue';
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
+import { supabase } from '../lib/supabaseClient'
 
 interface Message {
   sender: 'user' | 'machine';
@@ -219,43 +220,71 @@ const sendMessage = async () => {
 
   isProcessing.value = true;
 
+  // Add placeholder for streaming response
+  const responseIndex = messages.value.length;
+  messages.value.push({
+    sender: 'machine',
+    text: '',
+    model: selectedModel.value
+  });
+
   try {
-    const response = await fetchWithAuth(`${API_BASE_URL}/chat`, {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    const response = await fetch(`${API_BASE_URL}/chat/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : ''
       },
       body: JSON.stringify({
         message: txt,
         context: transcription.value,
         model: selectedModel.value
-      }),
-      signal: AbortSignal.timeout(120000) // 2 minute timeout for chat
+      })
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new Error(errorData.detail || 'Failed to get chat response');
+      throw new Error('Failed to get chat response');
     }
 
-    const data = await response.json();
-    messages.value.push({
-      sender: 'machine',
-      text: data.response,
-      model: selectedModel.value
-    });
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.text) {
+                messages.value[responseIndex].text += data.text;
+                scrollToBottom();
+              }
+              if (data.done) {
+                break;
+              }
+              if (data.error) {
+                throw new Error(data.error);
+              }
+            } catch (e) {
+              // Ignore JSON parse errors for incomplete chunks
+            }
+          }
+        }
+      }
+    }
 
   } catch (error: any) {
     console.error('Error sending message:', error);
-    let errorMessage = 'Sorry, I encountered an error. Please try again.';
-    if (error.name === 'TimeoutError') {
-      errorMessage = 'The response is taking longer than expected. Please try asking a simpler question or try again.';
-    }
-    messages.value.push({
-      sender: 'machine',
-      text: errorMessage,
-      model: selectedModel.value
-    });
+    messages.value[responseIndex].text = 'Sorry, I encountered an error. Please try again.';
   } finally {
     isProcessing.value = false;
     scrollToBottom();

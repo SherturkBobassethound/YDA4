@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import yt_dlp
@@ -644,6 +645,67 @@ async def chat(request: ChatRequest, user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest, user: dict = Depends(get_current_user)):
+    """Streaming chat endpoint with vector database integration"""
+    async def generate_stream():
+        try:
+            # Get user-specific vector database
+            vector_db = get_user_vector_db(user['id'])
+
+            # Enhanced context retrieval (same as regular chat)
+            enhanced_context = request.context
+            try:
+                if request.context:
+                    search_results = vector_db.search(request.message, k=5)
+                    if search_results:
+                        vector_context_parts = []
+                        for i, doc in enumerate(search_results, 1):
+                            vector_context_parts.append(f"Relevant excerpt {i}: {doc.page_content}")
+                        vector_context = "\n\n".join(vector_context_parts)
+                        enhanced_context = f"Based on these relevant excerpts from the content:\n\n{vector_context}\n\n"
+            except Exception as e:
+                logger.warning(f"Vector DB search failed: {str(e)}")
+
+            # Prepare prompt
+            if enhanced_context:
+                max_context = 4000
+                if len(enhanced_context) > max_context:
+                    enhanced_context = enhanced_context[:max_context] + "... [truncated]"
+                prompt = f"{enhanced_context}\n\nUser question: {request.message}\n\nPlease provide a helpful response based on the content above."
+            else:
+                prompt = request.message
+
+            # Stream from Ollama API
+            import httpx
+            import json
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream(
+                    'POST',
+                    f"{OLLAMA_API_URL}/chat/stream",
+                    json={
+                        "message": prompt,
+                        "model": request.model,
+                        "system_prompt": "You are a helpful assistant that answers questions accurately and concisely based on the provided context."
+                    }
+                ) as response:
+                    async for line in response.aiter_lines():
+                        if line and line.startswith('data: '):
+                            yield line + '\n\n'
+        except Exception as e:
+            logger.error(f"Error in streaming chat: {str(e)}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @app.get("/search")
 async def search_transcripts(query: str, k: int = 5, user: dict = Depends(get_current_user)):
