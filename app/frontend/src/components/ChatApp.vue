@@ -128,7 +128,11 @@ const showFullTranscription = ref(false);
 const selectedModel = ref('llama3.2:1b'); // Default lightweight model
 const availableModels = ref<ModelInfo[]>([
   { name: 'llama3.2:1b', size: '~1.3GB', description: 'Lightweight, fast responses' },
+  { name: 'phi3:3.8b', size: '~2.3GB', description: 'Microsoft Phi-3, excellent quality for size' },
+  { name: 'gemma2:2b', size: '~1.6GB', description: 'Google Gemma 2, fast and efficient' },
   { name: 'llama3.2:3b', size: '~3GB', description: 'Better quality, balanced performance' },
+  { name: 'qwen2.5:7b', size: '~4.7GB', description: 'Qwen 2.5, strong reasoning and multilingual' },
+  { name: 'deepseek-r1:7b', size: '~4.7GB', description: 'DeepSeek R1, excellent reasoning capabilities' },
   { name: 'llama3:8b', size: '~4.7GB', description: 'High quality, slower responses' }
 ]);
 
@@ -175,7 +179,11 @@ const formatBytes = (bytes: number): string => {
 const getModelDescription = (modelName: string): string => {
   const descriptions: Record<string, string> = {
     'llama3.2:1b': 'Lightweight, fast responses',
-    'llama3.2:3b': 'Better quality, balanced performance', 
+    'phi3:3.8b': 'Microsoft Phi-3, excellent quality for size',
+    'gemma2:2b': 'Google Gemma 2, fast and efficient',
+    'llama3.2:3b': 'Better quality, balanced performance',
+    'qwen2.5:7b': 'Qwen 2.5, strong reasoning and multilingual',
+    'deepseek-r1:7b': 'DeepSeek R1, excellent reasoning capabilities',
     'llama3:8b': 'High quality, slower responses',
     'codellama:7b': 'Specialized for code tasks',
     'default': 'General purpose model'

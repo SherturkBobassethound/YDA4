@@ -66,13 +66,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load Whisper model
-try:
-    model = whisper.load_model("base")
-    logger.info("Whisper model loaded successfully")
-except Exception as e:
-    logger.error(f"Error loading Whisper model: {str(e)}")
-    raise
+# Lazy load Whisper model - will only load when first needed
+_whisper_model = None
+
+def get_whisper_model():
+    """Lazy load Whisper model on first use to save memory"""
+    global _whisper_model
+    if _whisper_model is None:
+        logger.info("Loading Whisper model for the first time...")
+        try:
+            _whisper_model = whisper.load_model("base")
+            logger.info("Whisper model loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading Whisper model: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to load Whisper model: {str(e)}")
+    return _whisper_model
 
 class TranscriptionRequest(BaseModel):
     youtube_url: Optional[str] = None
@@ -279,9 +287,10 @@ def download_youtube_audio(url: str) -> dict:
                     raise HTTPException(status_code=400, detail=f"Failed to download YouTube video after all attempts. Primary error: {str(e)}. Fallback error: {str(fallback_error)}. Video fallback error: {str(video_fallback_error)}. Final fallback error: {str(final_error)}")
 
 def transcribe_audio(audio_path: str) -> str:
-    """Transcribe audio file using Whisper model"""
+    """Transcribe audio file using Whisper model (lazy loaded)"""
     logger.info(f"Starting transcription of audio file: {audio_path}")
     try:
+        model = get_whisper_model()  # Lazy load the model
         result = model.transcribe(audio_path)
         logger.info("Transcription completed successfully")
         return result["text"]
@@ -748,7 +757,7 @@ async def health_check():
     """Health check endpoint that also verifies service connections"""
     status = {
         "status": "healthy",
-        "whisper": "loaded",
+        "whisper": "loaded" if _whisper_model is not None else "not loaded (lazy)",
         "ollama_api": "disconnected",
         "qdrant": "disconnected"
     }
