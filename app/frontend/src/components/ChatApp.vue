@@ -1,32 +1,12 @@
 <template>
   <div class="chat-container">
-    <!-- Welcome Screen (only for logged-out users) -->
-    <div class="initial-state" v-if="!hasTranscription && !isAuthenticated">
-      <div class="welcome-card">
-        <h3>Welcome to YODA</h3>
-        <p>Please log in to start chatting with your podcast content.</p>
-        <div class="instructions">
-          <h4>How to get started:</h4>
-          <ol>
-            <li>Log in using the profile button</li>
-            <li>Paste a YouTube or Apple Podcasts URL in the sidebar</li>
-            <li>Wait for processing to complete</li>
-            <li>Start asking questions about the content!</li>
-          </ol>
-        </div>
-      </div>
+    <!-- Message for logged-out users -->
+    <div v-if="!isAuthenticated" class="logged-out-message">
+      <p>Please log in to start using YODA.</p>
     </div>
 
-    <!-- Empty chat state (for logged-in users with no transcription) -->
-    <div class="initial-state" v-if="!hasTranscription && isAuthenticated">
-      <div class="welcome-card">
-        <h3>Ready to Chat</h3>
-        <p>Add a podcast or YouTube URL from the sidebar to start chatting.</p>
-      </div>
-    </div>
-
-    <!-- Chat Section (shows after transcription) -->
-    <div v-if="hasTranscription" class="chat-section">
+    <!-- Chat Section -->
+    <div v-if="isAuthenticated" class="chat-section">
       <!-- Model Selection -->
       <div class="model-selection">
         <label for="model-select">AI Model:</label>
@@ -38,8 +18,8 @@
         <span class="model-info">{{ getModelDescription(selectedModel) }}</span>
       </div>
 
-      <!-- Transcription Summary -->
-      <div class="transcription-summary">
+      <!-- Transcription Summary (only shown when content is processed) -->
+      <div v-if="hasTranscription" class="transcription-summary">
         <h4>Summary</h4>
         <p>{{ summary }}</p>
         <button @click="toggleTranscription" class="toggle-btn">
@@ -52,6 +32,11 @@
 
       <!-- Chat Messages -->
       <div class="messages-container" ref="messagesContainer">
+        <!-- Welcome message when no transcription -->
+        <div v-if="!hasTranscription && messages.length === 0" class="empty-state-message">
+          <p>Welcome to YODA! Add a podcast or YouTube URL from the sidebar to start chatting.</p>
+        </div>
+
         <div
           v-for="(msg, index) in messages"
           :key="index"
@@ -70,17 +55,17 @@
         <input
           type="text"
           v-model="newMessage"
-          placeholder="Ask questions about the content..."
+          :placeholder="hasTranscription ? 'Ask questions about the content...' : 'Add content from the sidebar to start chatting'"
           @keyup.enter="sendMessage"
-          :disabled="isProcessing"
+          :disabled="isProcessing || !hasTranscription"
         />
-        <button @click="sendMessage" :disabled="isProcessing || !newMessage.trim()">
+        <button @click="sendMessage" :disabled="isProcessing || !newMessage.trim() || !hasTranscription">
           {{ isProcessing ? 'Thinking...' : 'Send' }}
         </button>
       </div>
 
-      <!-- Reset Button -->
-      <div class="reset-section">
+      <!-- Reset Button (only shown when content is processed) -->
+      <div v-if="hasTranscription" class="reset-section">
         <button @click="reset" class="reset-btn">Process New Audio</button>
       </div>
     </div>
@@ -287,6 +272,21 @@ defineExpose({
   background-color: #ffffff;
 }
 
+.logged-out-message {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px;
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.logged-out-message p {
+  margin: 0;
+}
+
 /* Model Selection Styles */
 .model-selection {
   padding: 15px 20px;
@@ -450,6 +450,18 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 15px;
+}
+
+.empty-state-message {
+  text-align: center;
+  padding: 40px 20px;
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.empty-state-message p {
+  margin: 0;
+  line-height: 1.6;
 }
 
 .message {
