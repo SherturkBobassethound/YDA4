@@ -32,9 +32,9 @@
 
       <!-- Chat Messages -->
       <div class="messages-container" ref="messagesContainer">
-        <!-- Welcome message when no transcription -->
-        <div v-if="!hasTranscription && messages.length === 0" class="empty-state-message">
-          <p>Welcome to YODA! Add a podcast or YouTube URL from the sidebar to start chatting.</p>
+        <!-- Welcome message when no messages -->
+        <div v-if="messages.length === 0" class="empty-state-message">
+          <p>Welcome to YODA! Start chatting with your sources or add a podcast/YouTube URL from the sidebar.</p>
         </div>
 
         <div
@@ -55,11 +55,11 @@
         <input
           type="text"
           v-model="newMessage"
-          :placeholder="hasTranscription ? 'Ask questions about the content...' : 'Add content from the sidebar to start chatting'"
+          :placeholder="hasTranscription ? 'Ask questions about the content...' : 'Ask questions about your sources...'"
           @keyup.enter="sendMessage"
-          :disabled="isProcessing || !hasTranscription"
+          :disabled="isProcessing"
         />
-        <button @click="sendMessage" :disabled="isProcessing || !newMessage.trim() || !hasTranscription">
+        <button @click="sendMessage" :disabled="isProcessing || !newMessage.trim()">
           {{ isProcessing ? 'Thinking...' : 'Send' }}
         </button>
       </div>
