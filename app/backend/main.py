@@ -720,23 +720,27 @@ async def delete_source(source_id: str, user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=404, detail="Source not found")
 
         source = result.data[0]
+        source_url = source['url']
+
+        # Delete from Qdrant vector database first
+        try:
+            # Get user-specific vector database
+            vector_db = get_user_vector_db(user['id'])
+
+            # Delete all vectors associated with this URL
+            vector_db.delete_by_url(source_url)
+            logger.info(f"Deleted vectors for URL: {source_url} from user's vector database")
+        except Exception as e:
+            logger.error(f"Error deleting vectors for source {source_id}: {str(e)}")
+            # Continue with Supabase deletion even if vector deletion fails
+            # This prevents orphaned database records
 
         # Delete from Supabase
         user_supabase.table('sources').delete().eq('id', source_id).eq('user_id', user['id']).execute()
 
-        # Delete from Qdrant vector database
-        # Get user-specific vector database
-        vector_db = get_user_vector_db(user['id'])
-
-        # Delete all vectors associated with this URL
-        # Qdrant doesn't have a direct "delete by metadata" method, so we need to search first
-        # then delete by IDs. For now, we'll leave the vectors in place and rely on
-        # the source list to filter what's shown to users.
-        # TODO: Implement vector cleanup if storage becomes an issue
-
         logger.info(f"Deleted source {source_id} for user {user['id']}")
 
-        return {"success": True, "message": "Source deleted successfully"}
+        return {"success": True, "message": "Source and associated vectors deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
