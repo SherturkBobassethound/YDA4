@@ -183,10 +183,25 @@ cd ../..
 # Wait for ollama-api to start
 sleep 3
 
+# Load environment variables from .env file
+if [ -f .env ]; then
+    echo -e "${YELLOW}Loading environment variables from .env...${NC}"
+    export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+    echo -e "${GREEN}✓ Environment variables loaded${NC}"
+else
+    echo -e "${RED}Warning: .env file not found! Supabase features will not work.${NC}"
+fi
+
 # Start Backend API
 echo -e "${GREEN}Starting Backend API (port 8000)...${NC}"
 cd app/backend
-QDRANT_URL=http://localhost:6333 OLLAMA_API_URL=http://localhost:8001 uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
+QDRANT_URL=http://localhost:6333 \
+OLLAMA_API_URL=http://localhost:8001 \
+SUPABASE_URL="${SUPABASE_URL}" \
+SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}" \
+SUPABASE_JWT_SECRET="${SUPABASE_JWT_SECRET}" \
+SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY}" \
+uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
 BACKEND_PID=$!
 cd ../..
 
@@ -196,7 +211,11 @@ sleep 3
 # Start Frontend
 echo -e "${GREEN}Starting Frontend (port 5173)...${NC}"
 cd app/frontend
-VITE_API_BASE_URL=http://localhost:8000 VITE_OLLAMA_API_URL=http://localhost:8001 npm run dev > ../../logs/frontend.log 2>&1 &
+VITE_API_BASE_URL=http://localhost:8000 \
+VITE_OLLAMA_API_URL=http://localhost:8001 \
+VITE_SUPABASE_URL="${SUPABASE_URL}" \
+VITE_SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}" \
+npm run dev > ../../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 cd ../..
 

@@ -87,6 +87,38 @@ class QdrantDB:
         """
         return self.vectorstore.similarity_search(query, k=k)
 
+    def delete_by_url(self, url: str) -> int:
+        """
+        Delete all vectors associated with a specific URL from the collection.
+
+        Args:
+            url (str): The URL to match in metadata
+
+        Returns:
+            int: Number of vectors deleted
+        """
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+        try:
+            # Delete all points where metadata.url matches the given URL
+            result = self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=Filter(
+                    must=[
+                        FieldCondition(
+                            key="metadata.url",
+                            match=MatchValue(value=url)
+                        )
+                    ]
+                )
+            )
+
+            print(f"Deleted vectors for URL: {url} from collection: {self.collection_name}")
+            return result
+        except Exception as e:
+            print(f"Error deleting vectors for URL {url}: {str(e)}")
+            raise
+
 
 # -------------------- Testing Block --------------------
 
