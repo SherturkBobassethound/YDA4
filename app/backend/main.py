@@ -14,6 +14,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 from services.text_splitter import TextSplitter
 from services.pod_fetcher import PodFetcher
+from services.transcript_fetcher import TranscriptFetcher
 from services.supabase_client import supabase, get_user_supabase_client
 from db.supabase_vector_db import SupabaseVectorDB
 from auth import get_current_user
@@ -421,22 +422,42 @@ async def get_models():
 
 @app.post("/process-youtube")
 async def process_youtube(request: TranscriptionRequest, user: dict = Depends(get_current_user)):
-    """Process YouTube video: download audio, transcribe, and summarize"""
+    """Process YouTube video: tries to fetch existing transcript first, falls back to audio transcription"""
     if not request.youtube_url:
         raise HTTPException(status_code=400, detail="YouTube URL is required")
 
     logger.info(f"Processing YouTube URL: {request.youtube_url} for user: {user['id']}")
     audio_file = None
     video_title = "Unknown Title"
+    transcription = None
 
     try:
-        # Download audio from YouTube
-        download_result = download_youtube_audio(request.youtube_url)
-        audio_file = download_result['audio_file']
-        video_title = download_result['title']
+        # Step 1: Try to get existing YouTube transcript (fast and free!)
+        logger.info("Attempting to fetch existing YouTube transcript...")
+        transcript_result = TranscriptFetcher.get_youtube_transcript(request.youtube_url)
 
-        # Transcribe audio
-        transcription = transcribe_audio(audio_file)
+        if transcript_result:
+            transcription = transcript_result['transcript']
+            logger.info(f"Successfully fetched transcript from {transcript_result['source']}")
+
+            # Get video metadata for title
+            try:
+                ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': True}
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(request.youtube_url, download=False)
+                    video_title = info.get('title', 'Unknown Title')
+            except Exception as e:
+                logger.warning(f"Could not fetch video title: {str(e)}")
+                video_title = "YouTube Video"
+
+        # Step 2: Fall back to audio download + Whisper transcription
+        if not transcription:
+            logger.info("No transcript found, falling back to audio download and transcription...")
+            download_result = download_youtube_audio(request.youtube_url)
+            audio_file = download_result['audio_file']
+            video_title = download_result['title']
+            transcription = transcribe_audio(audio_file)
+            logger.info("Audio transcription completed")
 
         # Save source to database FIRST to get source_id
         user_supabase = get_user_supabase_client(user['token'])
@@ -538,7 +559,7 @@ async def process_audio(file: UploadFile, user: dict = Depends(get_current_user)
     
 @app.post("/process-podcast")
 async def process_podcast(request: TranscriptionRequest, user: dict = Depends(get_current_user)):
-    """Process podcast: download episode (audio or transcript), transcribe if needed, and summarize"""
+    """Process podcast: tries to fetch existing transcript first, falls back to audio transcription"""
     if not request.podcast_url:
         raise HTTPException(status_code=400, detail="Podcast URL is required")
 
@@ -547,7 +568,8 @@ async def process_podcast(request: TranscriptionRequest, user: dict = Depends(ge
     file_path = None
 
     try:
-        # Download podcast file
+        # PodFetcher already tries to get transcripts first (podscripts.co, RSS feeds, etc.)
+        # then falls back to audio download if no transcript is available
         info = fetcher.fetch(request.podcast_url)
         file_path = info["filepath"]
         episode_title = info.get("episode_title", "Unknown Podcast")
