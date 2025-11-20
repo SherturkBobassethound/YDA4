@@ -10,7 +10,7 @@ from pathlib import Path
 import logging
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from services.text_splitter import TextSplitter
 from services.pod_fetcher import PodFetcher
