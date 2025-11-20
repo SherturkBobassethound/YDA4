@@ -74,27 +74,11 @@ if [ ! -f .env ]; then
     fi
 fi
 
-# Start Docker services (Qdrant and Ollama)
-echo -e "${BLUE}Starting Docker services (Qdrant & Ollama)...${NC}"
+# Start Docker services (Ollama)
+echo -e "${BLUE}Starting Docker services (Ollama)...${NC}"
 docker-compose -f docker-compose.dev.yml up -d
 
 # Wait for services to be healthy with timeout
-echo -e "${YELLOW}Waiting for Qdrant to be ready...${NC}"
-RETRY_COUNT=0
-MAX_RETRIES=30
-until curl -s http://localhost:6333/health >/dev/null 2>&1; do
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
-        echo -e "${RED}✗ Qdrant failed to start after ${MAX_RETRIES} attempts${NC}"
-        echo -e "${YELLOW}Checking Docker logs:${NC}"
-        docker logs qdrant_db_dev --tail 20
-        exit 1
-    fi
-    echo -e "${YELLOW}  Attempt $RETRY_COUNT/$MAX_RETRIES...${NC}"
-    sleep 2
-done
-echo -e "${GREEN}✓ Qdrant is ready${NC}"
-
 echo -e "${YELLOW}Waiting for Ollama to be ready...${NC}"
 RETRY_COUNT=0
 until curl -s http://localhost:11434/api/version >/dev/null 2>&1; do
@@ -183,25 +167,10 @@ cd ../..
 # Wait for ollama-api to start
 sleep 3
 
-# Load environment variables from .env file
-if [ -f .env ]; then
-    echo -e "${YELLOW}Loading environment variables from .env...${NC}"
-    export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
-    echo -e "${GREEN}✓ Environment variables loaded${NC}"
-else
-    echo -e "${RED}Warning: .env file not found! Supabase features will not work.${NC}"
-fi
-
 # Start Backend API
 echo -e "${GREEN}Starting Backend API (port 8000)...${NC}"
 cd app/backend
-QDRANT_URL=http://localhost:6333 \
-OLLAMA_API_URL=http://localhost:8001 \
-SUPABASE_URL="${SUPABASE_URL}" \
-SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}" \
-SUPABASE_JWT_SECRET="${SUPABASE_JWT_SECRET}" \
-SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY}" \
-uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
+OLLAMA_API_URL=http://localhost:8001 uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
 BACKEND_PID=$!
 cd ../..
 
@@ -211,11 +180,7 @@ sleep 3
 # Start Frontend
 echo -e "${GREEN}Starting Frontend (port 5173)...${NC}"
 cd app/frontend
-VITE_API_BASE_URL=http://localhost:8000 \
-VITE_OLLAMA_API_URL=http://localhost:8001 \
-VITE_SUPABASE_URL="${SUPABASE_URL}" \
-VITE_SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}" \
-npm run dev > ../../logs/frontend.log 2>&1 &
+VITE_API_BASE_URL=http://localhost:8000 VITE_OLLAMA_API_URL=http://localhost:8001 npm run dev > ../../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 cd ../..
 
@@ -227,7 +192,6 @@ echo -e "${YELLOW}Service URLs:${NC}"
 echo -e "  Frontend:    ${GREEN}http://localhost:5173${NC}"
 echo -e "  Backend API: ${GREEN}http://localhost:8000${NC}"
 echo -e "  Ollama API:  ${GREEN}http://localhost:8001${NC}"
-echo -e "  Qdrant:      ${GREEN}http://localhost:6333${NC}"
 echo -e "  Ollama:      ${GREEN}http://localhost:11434${NC}\n"
 
 echo -e "${YELLOW}Logs:${NC}"
