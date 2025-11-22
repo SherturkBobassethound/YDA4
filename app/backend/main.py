@@ -10,30 +10,29 @@ from pathlib import Path
 import logging
 from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from services.text_splitter import TextSplitter
-from services.user_manager import UserIdentifier
 from services.pod_fetcher import PodFetcher
+from services.transcript_fetcher import TranscriptFetcher
 from services.supabase_client import supabase, get_user_supabase_client
-from db.qdrant_db import QdrantDB
+from db.supabase_vector_db import SupabaseVectorDB
 from auth import get_current_user
 
 # Initialize components
 embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 # Get service URLs from environment variables with fallbacks for local development
-QDRANT_URL = os.getenv('QDRANT_URL', 'http://localhost:6333')
 OLLAMA_API_URL = os.getenv('OLLAMA_API_URL', 'http://localhost:8001')
 
 # Initialize services
 text_splitter = TextSplitter(chunk_size=500, chunk_overlap=50)
 
 # Helper function to get user-specific vector DB
-def get_user_vector_db(user_id: str) -> QdrantDB:
-    """Get or create a QdrantDB instance for the specific user"""
-    collection_name = UserIdentifier.get_collection_name(user_id)
-    return QdrantDB(collection_name=collection_name, embedding_model=embedding_model, client_url=QDRANT_URL)
+def get_user_vector_db(user_id: str, user_token: str) -> SupabaseVectorDB:
+    """Get a SupabaseVectorDB instance for the specific user"""
+    supabase_client = get_user_supabase_client(user_token)
+    return SupabaseVectorDB(user_id=user_id, embedding_model=embedding_model, supabase_client=supabase_client)
 
 # Load environment variables
 load_dotenv()
@@ -322,7 +321,7 @@ def generate_summary_ollama(text: str, model_name: str = "llama3.2:1b") -> str:
         logger.error(f"Error generating summary with Ollama: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
-def chat_with_ollama(message: str, vector_db: QdrantDB, context: str = None, model_name: str = "llama3.2:1b") -> str:
+def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = None, model_name: str = "llama3.2:1b") -> str:
     """Chat with Ollama model through the API service, with enhanced context from vector DB"""
     logger.info(f"Starting chat with Ollama model: {model_name}")
 
@@ -336,10 +335,10 @@ def chat_with_ollama(message: str, vector_db: QdrantDB, context: str = None, mod
                 # Format the search results into a context string
                 vector_context_parts = []
                 for i, doc in enumerate(search_results, 1):
-                    vector_context_parts.append(f"Relevant excerpt {i}: {doc.page_content}")
-                
+                    vector_context_parts.append(f"Relevant excerpt {i}: {doc['page_content']}")
+
                 vector_context = "\n\n".join(vector_context_parts)
-                
+
                 # Combine original context with vector search results
                 enhanced_context = f"Based on these relevant excerpts from the content:\n\n{vector_context}\n\n"
                 logger.info(f"Enhanced context with {len(search_results)} relevant chunks from vector DB")
@@ -382,9 +381,9 @@ def chat_with_ollama(message: str, vector_db: QdrantDB, context: str = None, mod
         logger.error(f"Error in chat with Ollama: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate chat response: {str(e)}")
 
-def store_transcript_in_vector_db(transcript: str, source: str, url: str, user_id: str, vector_db: QdrantDB):
+def store_transcript_in_vector_db(transcript: str, source_id: str, source: str, url: str, user_id: str, vector_db: SupabaseVectorDB):
     """
-    Splits a transcript into chunks and inserts them into the Qdrant vector DB
+    Splits a transcript into chunks and inserts them into the Supabase vector DB
     with metadata for retrieval.
     """
     logger.info("Splitting transcript into chunks for vector DB storage...")
@@ -400,11 +399,12 @@ def store_transcript_in_vector_db(transcript: str, source: str, url: str, user_i
             "url": url,
             "chunk_index": i,
             "user_id": user_id,
+            "source_id": source_id,
             "timestamp": f"{i * 30}s"  # Approximate timestamp for chunks
         })
 
     if texts:
-        vector_db.vectorstore.add_texts(texts=texts, metadatas=metadatas)
+        vector_db.add_texts(texts=texts, source_id=source_id, metadata=metadatas)
         logger.info(f"Inserted {len(texts)} chunks into vector DB for {source} at {url}")
     else:
         logger.warning("No chunks were created from transcript; skipping vector DB insert.")
@@ -422,53 +422,70 @@ async def get_models():
 
 @app.post("/process-youtube")
 async def process_youtube(request: TranscriptionRequest, user: dict = Depends(get_current_user)):
-    """Process YouTube video: download audio, transcribe, and summarize"""
+    """Process YouTube video: tries to fetch existing transcript first, falls back to audio transcription"""
     if not request.youtube_url:
         raise HTTPException(status_code=400, detail="YouTube URL is required")
 
     logger.info(f"Processing YouTube URL: {request.youtube_url} for user: {user['id']}")
     audio_file = None
     video_title = "Unknown Title"
-
-    # Get user-specific vector database
-    vector_db = get_user_vector_db(user['id'])
+    transcription = None
 
     try:
-        # Download audio from YouTube
-        download_result = download_youtube_audio(request.youtube_url)
-        audio_file = download_result['audio_file']
-        video_title = download_result['title']
+        # Step 1: Try to get existing YouTube transcript (fast and free!)
+        logger.info("Attempting to fetch existing YouTube transcript...")
+        transcript_result = TranscriptFetcher.get_youtube_transcript(request.youtube_url)
 
-        # Transcribe audio
-        transcription = transcribe_audio(audio_file)
+        if transcript_result:
+            transcription = transcript_result['transcript']
+            logger.info(f"Successfully fetched transcript from {transcript_result['source']}")
 
-        # Store transcript in vector database
-        store_transcript_in_vector_db(transcription, source="youtube", url=request.youtube_url, user_id=user['id'], vector_db=vector_db)
+            # Get video metadata for title
+            try:
+                ydl_opts = {'quiet': True, 'no_warnings': True, 'extract_flat': True}
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(request.youtube_url, download=False)
+                    video_title = info.get('title', 'Unknown Title')
+            except Exception as e:
+                logger.warning(f"Could not fetch video title: {str(e)}")
+                video_title = "YouTube Video"
+
+        # Step 2: Fall back to audio download + Whisper transcription
+        if not transcription:
+            logger.info("No transcript found, falling back to audio download and transcription...")
+            download_result = download_youtube_audio(request.youtube_url)
+            audio_file = download_result['audio_file']
+            video_title = download_result['title']
+            transcription = transcribe_audio(audio_file)
+            logger.info("Audio transcription completed")
+
+        # Save source to database FIRST to get source_id
+        user_supabase = get_user_supabase_client(user['token'])
+        source_result = user_supabase.table('sources').insert({
+            "user_id": user['id'],
+            "title": video_title,
+            "url": request.youtube_url,
+            "type": "youtube"
+        }).execute()
+        source_id = source_result.data[0]['id']
+        logger.info(f"Saved source to database: {video_title} (ID: {source_id})")
+
+        # Get user-specific vector database
+        vector_db = get_user_vector_db(user['id'], user['token'])
+
+        # Store transcript in vector database with source_id
+        store_transcript_in_vector_db(transcription, source_id=source_id, source="youtube", url=request.youtube_url, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
 
         # Generate summary using Ollama
         summary = generate_summary_ollama(transcription)
-
-        # Save source to database using user's token for RLS
-        try:
-            user_supabase = get_user_supabase_client(user['token'])
-            user_supabase.table('sources').insert({
-                "user_id": user['id'],
-                "title": video_title,
-                "url": request.youtube_url,
-                "type": "youtube"
-            }).execute()
-            logger.info(f"Saved source to database: {video_title}")
-        except Exception as e:
-            # Don't fail the whole request if source saving fails (might be duplicate)
-            logger.warning(f"Could not save source to database: {str(e)}")
 
         return {
             "title": video_title,
             "transcription": transcription,
             "summary": summary
         }
-        
+
     except Exception as e:
         logger.error(f"Error in process_youtube: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -490,9 +507,6 @@ async def process_audio(file: UploadFile, user: dict = Depends(get_current_user)
     logger.info(f"Processing uploaded audio file: {file.filename} for user: {user['id']}")
     temp_path = None
 
-    # Get user-specific vector database
-    vector_db = get_user_vector_db(user['id'])
-
     try:
         # Save uploaded file to temporary location
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as temp_file:
@@ -504,18 +518,33 @@ async def process_audio(file: UploadFile, user: dict = Depends(get_current_user)
         # Transcribe audio
         transcription = transcribe_audio(temp_path)
 
-        # Store transcript in vector database
-        store_transcript_in_vector_db(transcription, source="audio_upload", url=file.filename, user_id=user['id'], vector_db=vector_db)
+        # Save source to database FIRST to get source_id
+        user_supabase = get_user_supabase_client(user['token'])
+        source_result = user_supabase.table('sources').insert({
+            "user_id": user['id'],
+            "title": file.filename,
+            "url": file.filename,
+            "type": "audio"
+        }).execute()
+        source_id = source_result.data[0]['id']
+        logger.info(f"Saved source to database: {file.filename} (ID: {source_id})")
+
+        # Get user-specific vector database
+        vector_db = get_user_vector_db(user['id'], user['token'])
+
+        # Store transcript in vector database with source_id
+        store_transcript_in_vector_db(transcription, source_id=source_id, source="audio_upload", url=file.filename, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
-        
+
         # Generate summary using Ollama
         summary = generate_summary_ollama(transcription)
-        
+
         return {
+            "title": file.filename,
             "transcription": transcription,
             "summary": summary
         }
-        
+
     except Exception as e:
         logger.error(f"Error in process_audio: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -530,7 +559,7 @@ async def process_audio(file: UploadFile, user: dict = Depends(get_current_user)
     
 @app.post("/process-podcast")
 async def process_podcast(request: TranscriptionRequest, user: dict = Depends(get_current_user)):
-    """Process podcast: download episode (audio or transcript), transcribe if needed, and summarize"""
+    """Process podcast: tries to fetch existing transcript first, falls back to audio transcription"""
     if not request.podcast_url:
         raise HTTPException(status_code=400, detail="Podcast URL is required")
 
@@ -538,11 +567,9 @@ async def process_podcast(request: TranscriptionRequest, user: dict = Depends(ge
     fetcher = PodFetcher()
     file_path = None
 
-    # Get user-specific vector database
-    vector_db = get_user_vector_db(user['id'])
-
     try:
-        # Download podcast file
+        # PodFetcher already tries to get transcripts first (podscripts.co, RSS feeds, etc.)
+        # then falls back to audio download if no transcript is available
         info = fetcher.fetch(request.podcast_url)
         file_path = info["filepath"]
         episode_title = info.get("episode_title", "Unknown Podcast")
@@ -565,27 +592,27 @@ async def process_podcast(request: TranscriptionRequest, user: dict = Depends(ge
             transcription = transcribe_audio(file_path)
             logger.info("Audio file transcribed successfully")
 
-        # Store transcript in vector database
-        store_transcript_in_vector_db(transcription, source="podcast", url=request.podcast_url, user_id=user['id'], vector_db=vector_db)
+        # Save source to database FIRST to get source_id
+        user_supabase = get_user_supabase_client(user['token'])
+        source_result = user_supabase.table('sources').insert({
+            "user_id": user['id'],
+            "title": full_title,
+            "url": request.podcast_url,
+            "type": "podcast"
+        }).execute()
+        source_id = source_result.data[0]['id']
+        logger.info(f"Saved source to database: {full_title} (ID: {source_id})")
+
+        # Get user-specific vector database
+        vector_db = get_user_vector_db(user['id'], user['token'])
+
+        # Store transcript in vector database with source_id
+        store_transcript_in_vector_db(transcription, source_id=source_id, source="podcast", url=request.podcast_url, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
 
         # Generate summary
         summary = generate_summary_ollama(transcription)
         logger.info("Summary generated successfully")
-
-        # Save source to database using user's token for RLS
-        try:
-            user_supabase = get_user_supabase_client(user['token'])
-            user_supabase.table('sources').insert({
-                "user_id": user['id'],
-                "title": full_title,
-                "url": request.podcast_url,
-                "type": "podcast"
-            }).execute()
-            logger.info(f"Saved source to database: {full_title}")
-        except Exception as e:
-            # Don't fail the whole request if source saving fails (might be duplicate)
-            logger.warning(f"Could not save source to database: {str(e)}")
 
         return {
             "title": full_title,
@@ -628,7 +655,7 @@ async def chat(request: ChatRequest, user: dict = Depends(get_current_user)):
     """Enhanced chat endpoint with vector database integration"""
     try:
         # Get user-specific vector database
-        vector_db = get_user_vector_db(user['id'])
+        vector_db = get_user_vector_db(user['id'], user['token'])
 
         response = chat_with_ollama(request.message, vector_db, request.context, request.model)
         return {"response": response}
@@ -641,14 +668,14 @@ async def search_transcripts(query: str, k: int = 5, user: dict = Depends(get_cu
     """Search through stored transcripts using vector similarity"""
     try:
         # Get user-specific vector database
-        vector_db = get_user_vector_db(user['id'])
+        vector_db = get_user_vector_db(user['id'], user['token'])
 
         results = vector_db.search(query, k=k)
         formatted_results = []
         for doc in results:
             formatted_results.append({
-                "content": doc.page_content,
-                "metadata": doc.metadata if hasattr(doc, 'metadata') else {}
+                "content": doc['page_content'],
+                "metadata": doc.get('metadata', {})
             })
         return {"results": formatted_results}
     except Exception as e:
@@ -657,20 +684,27 @@ async def search_transcripts(query: str, k: int = 5, user: dict = Depends(get_cu
 
 @app.get("/sources")
 async def get_sources(user: dict = Depends(get_current_user)):
-    """Get all sources for the authenticated user"""
+    """Get all sources for the authenticated user with chunk counts"""
     try:
         user_supabase = get_user_supabase_client(user['token'])
         result = user_supabase.table('sources').select('*').eq('user_id', user['id']).order('created_at', desc=True).execute()
 
+        # Get vector DB instance to check chunk counts
+        vector_db = get_user_vector_db(user['id'], user['token'])
+
         # Format the response to match frontend expectations
         sources = []
         for item in result.data:
+            # Get chunk count for this source
+            chunk_count = vector_db.get_source_count(item['id'])
+
             sources.append({
                 "id": item['id'],
                 "title": item['title'],
                 "url": item['url'],
                 "type": item['type'],
-                "addedAt": item['created_at']
+                "addedAt": item['created_at'],
+                "chunkCount": chunk_count
             })
 
         return {"sources": sources}
@@ -708,39 +742,23 @@ async def create_source(source: SourceCreate, user: dict = Depends(get_current_u
 
 @app.delete("/sources/{source_id}")
 async def delete_source(source_id: str, user: dict = Depends(get_current_user)):
-    """Delete a source and its associated vector data"""
+    """Delete a source and its associated vector data (CASCADE)"""
     try:
         # Use user's token for RLS
         user_supabase = get_user_supabase_client(user['token'])
-        
+
         # First, verify the source belongs to the user
         result = user_supabase.table('sources').select('*').eq('id', source_id).eq('user_id', user['id']).execute()
 
         if not result.data:
             raise HTTPException(status_code=404, detail="Source not found")
 
-        source = result.data[0]
-        source_url = source['url']
-
-        # Delete from Qdrant vector database first
-        try:
-            # Get user-specific vector database
-            vector_db = get_user_vector_db(user['id'])
-
-            # Delete all vectors associated with this URL
-            vector_db.delete_by_url(source_url)
-            logger.info(f"Deleted vectors for URL: {source_url} from user's vector database")
-        except Exception as e:
-            logger.error(f"Error deleting vectors for source {source_id}: {str(e)}")
-            # Continue with Supabase deletion even if vector deletion fails
-            # This prevents orphaned database records
-
-        # Delete from Supabase
+        # Delete from Supabase (CASCADE will automatically delete document_chunks)
         user_supabase.table('sources').delete().eq('id', source_id).eq('user_id', user['id']).execute()
 
-        logger.info(f"Deleted source {source_id} for user {user['id']}")
+        logger.info(f"Deleted source {source_id} and its chunks for user {user['id']}")
 
-        return {"success": True, "message": "Source and associated vectors deleted successfully"}
+        return {"success": True, "message": "Source and associated chunks deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
@@ -754,23 +772,23 @@ async def health_check():
         "status": "healthy",
         "whisper": "loaded",
         "ollama_api": "disconnected",
-        "qdrant": "disconnected"
+        "supabase": "disconnected"
     }
-    
+
     try:
         # Check if Ollama API service is running
         response = requests.get(f"{OLLAMA_API_URL}/models", timeout=5)
         status["ollama_api"] = "connected" if response.status_code == 200 else "disconnected"
     except Exception as e:
         logger.warning(f"Ollama API health check failed: {str(e)}")
-    
+
     try:
-        # Check if Qdrant is running
-        response = requests.get(f"{QDRANT_URL}/", timeout=5)
-        status["qdrant"] = "connected" if response.status_code == 200 else "disconnected"
+        # Check if Supabase is accessible
+        result = supabase.table('sources').select('id', count='exact').limit(1).execute()
+        status["supabase"] = "connected"
     except Exception as e:
-        logger.warning(f"Qdrant health check failed: {str(e)}")
-    
+        logger.warning(f"Supabase health check failed: {str(e)}")
+
     return status
 
 if __name__ == "__main__":

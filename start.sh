@@ -91,34 +91,6 @@ check_service_response() {
     return 1
 }
 
-# Function to check Qdrant specifically (it has different endpoints)
-check_qdrant_health() {
-    local max_attempts=60
-    local attempt=1
-    
-    echo "⏳ Checking Qdrant health..."
-    
-    while [ $attempt -le $max_attempts ]; do
-        # Try multiple Qdrant endpoints
-        if curl -f -s -m 5 "http://localhost:6333/collections" > /dev/null 2>&1; then
-            echo "✅ Qdrant is healthy (collections endpoint responding)!"
-            return 0
-        elif curl -f -s -m 5 "http://localhost:6333/" > /dev/null 2>&1; then
-            echo "✅ Qdrant is healthy (root endpoint responding)!"
-            return 0
-        fi
-        
-        if [ $((attempt % 10)) -eq 0 ]; then
-            echo "   Attempt $attempt/$max_attempts - waiting for Qdrant..."
-        fi
-        sleep 3
-        attempt=$((attempt + 1))
-    done
-    
-    echo "⚠️  Qdrant not responding, but continuing..."
-    return 1
-}
-
 # Function to check container status
 check_container_running() {
     local container_name=$1
@@ -162,7 +134,6 @@ services:
 
   backend:
     depends_on:
-      - qdrant
       - ollama-api
     # Remove health check dependency
 
@@ -182,11 +153,7 @@ else
     # Start services in stages to avoid dependency issues
     echo "🚀 Starting core services..."
 
-    # Stage 1: Start base services (Qdrant and Ollama)
-    echo "📊 Starting Qdrant (Vector Database)..."
-    docker-compose -f "$COMPOSE_FILE" up -d qdrant
-    sleep 10
-
+    # Stage 1: Start base services (Ollama)
     echo "🤖 Starting Ollama (LLM Service)..."
     docker-compose -f "$COMPOSE_FILE" up -d ollama
     sleep 15
@@ -194,7 +161,6 @@ else
     # Stage 2: Check core services
     echo ""
     echo "🔍 Checking core services..."
-    check_qdrant_health
     check_service_response "Ollama" "http://localhost:11434/api/version"
 
     # Stage 3: Start API services (force start without health check dependencies)
@@ -239,24 +205,12 @@ echo "📱 Application URLs:"
 echo "   Frontend:    http://localhost"
 echo "   Backend API: http://localhost:8000"
 echo "   Ollama API:  http://localhost:8001"
-echo "   Qdrant DB:   http://localhost:6333"
 echo "   Ollama:      http://localhost:11434"
 echo ""
 
 # Final health check
 echo "📋 Service Health Check:"
 services_working=0
-
-echo -n "   Qdrant:      "
-if curl -f -s -m 5 "http://localhost:6333/collections" > /dev/null 2>&1; then
-    echo "✅ Online"
-    ((services_working++))
-elif curl -f -s -m 5 "http://localhost:6333/" > /dev/null 2>&1; then
-    echo "✅ Online (basic)"
-    ((services_working++))
-else
-    echo "❌ Offline"
-fi
 
 echo -n "   Ollama:      "
 if curl -f -s -m 5 "http://localhost:11434/api/version" > /dev/null 2>&1; then
@@ -291,7 +245,7 @@ else
 fi
 
 echo ""
-echo "📈 Services Status: $services_working/5 services responding"
+echo "📈 Services Status: $services_working/4 services responding"
 
 if [ $services_working -ge 3 ]; then
     echo "🎯 YODA is ready! Open http://localhost to start using the app"

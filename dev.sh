@@ -21,11 +21,6 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Function to check if a port is in use
-port_in_use() {
-    lsof -i :"$1" >/dev/null 2>&1
-}
-
 # Function to cleanup on exit
 cleanup() {
     echo -e "\n${YELLOW}Shutting down services...${NC}"
@@ -35,9 +30,9 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
-# Check required commands
+# Check required commands (without Docker)
 echo -e "${YELLOW}Checking dependencies...${NC}"
-required_commands=("docker" "docker-compose" "python3" "node" "npm")
+required_commands=("python3" "node" "npm")
 missing_commands=()
 
 for cmd in "${required_commands[@]}"; do
@@ -52,16 +47,7 @@ if [ ${#missing_commands[@]} -ne 0 ]; then
     exit 1
 fi
 
-echo -e "${GREEN}✓ All dependencies found${NC}"
-
-# Check if Docker daemon is running
-echo -e "${YELLOW}Checking Docker daemon...${NC}"
-if ! docker info >/dev/null 2>&1; then
-    echo -e "${RED}Error: Docker daemon is not running${NC}"
-    echo "Please start Docker and try again."
-    exit 1
-fi
-echo -e "${GREEN}✓ Docker is running${NC}\n"
+echo -e "${GREEN}✓ All dependencies found${NC}\n"
 
 # Check if .env exists, if not copy from .env.local
 if [ ! -f .env ]; then
@@ -74,51 +60,46 @@ if [ ! -f .env ]; then
     fi
 fi
 
-# Start Docker services (Qdrant and Ollama)
-echo -e "${BLUE}Starting Docker services (Qdrant & Ollama)...${NC}"
-docker-compose -f docker-compose.dev.yml up -d
-
-# Wait for services to be healthy with timeout
-echo -e "${YELLOW}Waiting for Qdrant to be ready...${NC}"
-RETRY_COUNT=0
-MAX_RETRIES=30
-until curl -s http://localhost:6333/health >/dev/null 2>&1; do
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
-        echo -e "${RED}✗ Qdrant failed to start after ${MAX_RETRIES} attempts${NC}"
-        echo -e "${YELLOW}Checking Docker logs:${NC}"
-        docker logs qdrant_db_dev --tail 20
-        exit 1
-    fi
-    echo -e "${YELLOW}  Attempt $RETRY_COUNT/$MAX_RETRIES...${NC}"
-    sleep 2
-done
-echo -e "${GREEN}✓ Qdrant is ready${NC}"
-
-echo -e "${YELLOW}Waiting for Ollama to be ready...${NC}"
-RETRY_COUNT=0
-until curl -s http://localhost:11434/api/version >/dev/null 2>&1; do
-    RETRY_COUNT=$((RETRY_COUNT + 1))
-    if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
-        echo -e "${RED}✗ Ollama failed to start after ${MAX_RETRIES} attempts${NC}"
-        echo -e "${YELLOW}Checking Docker logs:${NC}"
-        docker logs ollama_service_dev --tail 20
-        exit 1
-    fi
-    echo -e "${YELLOW}  Attempt $RETRY_COUNT/$MAX_RETRIES...${NC}"
-    sleep 2
-done
-echo -e "${GREEN}✓ Ollama is ready${NC}\n"
-
-# Check if Ollama models are installed
-echo -e "${YELLOW}Checking Ollama models...${NC}"
-if docker exec ollama_service_dev ollama list | grep -q "llama3.2:1b"; then
-    echo -e "${GREEN}✓ Ollama models found${NC}\n"
+# Check if Ollama is already running (native or Docker)
+echo -e "${YELLOW}Checking Ollama...${NC}"
+if curl -s http://localhost:11434/api/version >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ Ollama is already running${NC}\n"
 else
-    echo -e "${YELLOW}Installing default Ollama model (llama3.2:1b)...${NC}"
-    echo -e "${YELLOW}This may take several minutes...${NC}"
-    docker exec ollama_service_dev ollama pull llama3.2:1b
-    echo -e "${GREEN}✓ Model installed${NC}\n"
+    # Ollama is not running, try to start it with Docker if available
+    if command_exists "docker" && docker info >/dev/null 2>&1; then
+        echo -e "${YELLOW}Starting Ollama in Docker...${NC}"
+        docker-compose -f docker-compose.dev.yml up -d
+
+        # Wait for Ollama to be ready
+        RETRY_COUNT=0
+        MAX_RETRIES=30
+        until curl -s http://localhost:11434/api/version >/dev/null 2>&1; do
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo -e "${RED}✗ Ollama failed to start${NC}"
+                echo "Please start Ollama manually or check Docker logs"
+                exit 1
+            fi
+            sleep 2
+        done
+        echo -e "${GREEN}✓ Ollama started in Docker${NC}\n"
+
+        # Check if models are installed
+        echo -e "${YELLOW}Checking Ollama models...${NC}"
+        if docker exec ollama_service_dev ollama list 2>/dev/null | grep -q "llama3.2:1b"; then
+            echo -e "${GREEN}✓ Ollama models found${NC}\n"
+        else
+            echo -e "${YELLOW}Installing default Ollama model (llama3.2:1b)...${NC}"
+            docker exec ollama_service_dev ollama pull llama3.2:1b
+            echo -e "${GREEN}✓ Model installed${NC}\n"
+        fi
+    else
+        echo -e "${RED}Error: Ollama is not running and Docker is not available${NC}"
+        echo -e "${YELLOW}Please either:${NC}"
+        echo -e "  1. Install and start Ollama: ${GREEN}https://ollama.ai${NC}"
+        echo -e "  2. Or install Docker and try again"
+        exit 1
+    fi
 fi
 
 # Create Python virtual environment if it doesn't exist
@@ -183,25 +164,10 @@ cd ../..
 # Wait for ollama-api to start
 sleep 3
 
-# Load environment variables from .env file
-if [ -f .env ]; then
-    echo -e "${YELLOW}Loading environment variables from .env...${NC}"
-    export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
-    echo -e "${GREEN}✓ Environment variables loaded${NC}"
-else
-    echo -e "${RED}Warning: .env file not found! Supabase features will not work.${NC}"
-fi
-
 # Start Backend API
 echo -e "${GREEN}Starting Backend API (port 8000)...${NC}"
 cd app/backend
-QDRANT_URL=http://localhost:6333 \
-OLLAMA_API_URL=http://localhost:8001 \
-SUPABASE_URL="${SUPABASE_URL}" \
-SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}" \
-SUPABASE_JWT_SECRET="${SUPABASE_JWT_SECRET}" \
-SUPABASE_SERVICE_KEY="${SUPABASE_SERVICE_KEY}" \
-uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
+OLLAMA_API_URL=http://localhost:8001 uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
 BACKEND_PID=$!
 cd ../..
 
@@ -211,11 +177,7 @@ sleep 3
 # Start Frontend
 echo -e "${GREEN}Starting Frontend (port 5173)...${NC}"
 cd app/frontend
-VITE_API_BASE_URL=http://localhost:8000 \
-VITE_OLLAMA_API_URL=http://localhost:8001 \
-VITE_SUPABASE_URL="${SUPABASE_URL}" \
-VITE_SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}" \
-npm run dev > ../../logs/frontend.log 2>&1 &
+VITE_API_BASE_URL=http://localhost:8000 VITE_OLLAMA_API_URL=http://localhost:8001 npm run dev > ../../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 cd ../..
 
@@ -227,7 +189,6 @@ echo -e "${YELLOW}Service URLs:${NC}"
 echo -e "  Frontend:    ${GREEN}http://localhost:5173${NC}"
 echo -e "  Backend API: ${GREEN}http://localhost:8000${NC}"
 echo -e "  Ollama API:  ${GREEN}http://localhost:8001${NC}"
-echo -e "  Qdrant:      ${GREEN}http://localhost:6333${NC}"
 echo -e "  Ollama:      ${GREEN}http://localhost:11434${NC}\n"
 
 echo -e "${YELLOW}Logs:${NC}"

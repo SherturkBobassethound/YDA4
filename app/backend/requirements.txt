@@ -19,13 +19,11 @@ openai-whisper
 # LangChain with updated packages (no deprecated imports)
 langchain==0.3.21
 langchain-huggingface
-langchain-qdrant
 langchain-community
 
 # Embeddings and vector search
 sentence-transformers==3.4.1
 faiss-cpu==1.10.0
-qdrant-client
 
 # Web scraping and processing
 beautifulsoup4==4.13.3
@@ -36,6 +34,7 @@ selenium==4.31.0
 # Document processing
 pymupdf==1.25.4
 yt-dlp
+youtube-transcript-api==0.6.3
 
 # Additional dependencies
 setuptools
