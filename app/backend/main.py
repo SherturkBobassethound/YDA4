@@ -325,28 +325,38 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
     """Chat with Ollama model through the API service, with enhanced context from vector DB"""
     logger.info(f"Starting chat with Ollama model: {model_name}")
 
-    # Enhanced context retrieval using vector database
-    enhanced_context = context
+    # Always search vector DB for relevant chunks, regardless of context
+    enhanced_context = None
     try:
-        if hasTranscription := bool(context):  # If we have a transcription context
-            # Search vector DB for relevant chunks
-            search_results = vector_db.search(message, k=5)
-            if search_results:
-                # Format the search results into a context string
-                vector_context_parts = []
-                for i, doc in enumerate(search_results, 1):
-                    vector_context_parts.append(f"Relevant excerpt {i}: {doc['page_content']}")
+        logger.info(f"Searching vector DB for question: {message}")
+        # Search vector DB for relevant chunks from ALL user's sources
+        search_results = vector_db.search(message, k=5)
 
-                vector_context = "\n\n".join(vector_context_parts)
+        if search_results:
+            # Format the search results into a context string
+            vector_context_parts = []
+            for i, doc in enumerate(search_results, 1):
+                # Include source information if available
+                source_info = doc.get('metadata', {}).get('source', 'Unknown source')
+                vector_context_parts.append(
+                    f"Relevant excerpt {i} (from {source_info}):\n{doc['page_content']}"
+                )
 
-                # Combine original context with vector search results
-                enhanced_context = f"Based on these relevant excerpts from the content:\n\n{vector_context}\n\n"
-                logger.info(f"Enhanced context with {len(search_results)} relevant chunks from vector DB")
-            else:
-                logger.info("No relevant chunks found in vector DB, using full transcript context")
+            vector_context = "\n\n".join(vector_context_parts)
+            enhanced_context = f"Based on these relevant excerpts from your sources:\n\n{vector_context}\n\n"
+            logger.info(f"Enhanced context with {len(search_results)} relevant chunks from vector DB")
+        else:
+            logger.info("No relevant chunks found in vector DB")
+            # If no vector search results and context provided, use that as fallback
+            if context:
+                enhanced_context = context
+                logger.info("Using provided context as fallback")
     except Exception as e:
-        logger.warning(f"Vector DB search failed, falling back to original context: {str(e)}")
-        enhanced_context = context
+        logger.warning(f"Vector DB search failed: {str(e)}")
+        # If vector search fails and context provided, use that as fallback
+        if context:
+            enhanced_context = context
+            logger.warning("Falling back to provided context")
     
     try:
         if enhanced_context:
@@ -356,7 +366,8 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
                 enhanced_context = enhanced_context[:max_context] + "... [truncated]"
             prompt = f"{enhanced_context}\n\nUser question: {message}\n\nPlease provide a helpful response based on the content above."
         else:
-            prompt = message
+            # No sources available
+            prompt = f"User question: {message}\n\nNote: I don't have any sources available to answer this question. Please let the user know they should add sources (YouTube videos, podcasts, or audio files) before asking questions."
             
         response = requests.post(
             f"{OLLAMA_API_URL}/chat",
