@@ -34,7 +34,7 @@
       <div class="messages-container" ref="messagesContainer">
         <!-- Welcome message when no messages -->
         <div v-if="messages.length === 0" class="empty-state-message">
-          <p>Welcome to YODA! Start chatting with your sources or add a podcast/YouTube URL from the sidebar.</p>
+          <p>Welcome to YODA! Ask questions about your sources, or add a podcast/YouTube URL from the sidebar to get started.</p>
         </div>
 
         <div
@@ -55,7 +55,7 @@
         <input
           type="text"
           v-model="newMessage"
-          :placeholder="hasTranscription ? 'Ask questions about the content...' : 'Ask questions about your sources...'"
+          placeholder="Ask questions about your sources..."
           @keyup.enter="sendMessage"
           :disabled="isProcessing"
         />
@@ -197,16 +197,23 @@ const sendMessage = async () => {
   isProcessing.value = true;
 
   try {
+    // Send request to backend - context is optional now since backend always searches vector DB
+    const requestBody: any = {
+      message: txt,
+      model: selectedModel.value
+    };
+
+    // Include context only if available (for fallback purposes)
+    if (transcription.value) {
+      requestBody.context = transcription.value;
+    }
+
     const response = await fetchWithAuth(`${API_BASE_URL}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        message: txt,
-        context: transcription.value,
-        model: selectedModel.value
-      }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(120000) // 2 minute timeout for chat
     });
 
