@@ -16,6 +16,7 @@ from services.text_splitter import TextSplitter
 from services.user_manager import UserIdentifier
 from services.pod_fetcher import PodFetcher
 from services.supabase_client import supabase, get_user_supabase_client
+from services.user_preferences import UserPreferencesService
 from db.qdrant_db import QdrantDB
 from auth import get_current_user
 
@@ -90,6 +91,9 @@ class SourceCreate(BaseModel):
     title: str
     url: str
     type: str  # 'youtube' or 'podcast'
+
+class PreferencesUpdate(BaseModel):
+    preferred_model: str
 
 def download_youtube_audio(url: str) -> dict:
     """Download audio from YouTube video and save to temporary file
@@ -446,8 +450,16 @@ async def process_youtube(request: TranscriptionRequest, user: dict = Depends(ge
         store_transcript_in_vector_db(transcription, source="youtube", url=request.youtube_url, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
 
+        # Get user's preferred model for summary generation
+        try:
+            preferences = UserPreferencesService.get_user_preferences(user['id'], user['token'])
+            preferred_model = preferences.get('preferred_model', 'gemma3:1b')
+        except Exception as e:
+            logger.warning(f"Could not load user preferences for summary, using default: {str(e)}")
+            preferred_model = 'gemma3:1b'
+
         # Generate summary using Ollama
-        summary = generate_summary_ollama(transcription)
+        summary = generate_summary_ollama(transcription, preferred_model)
 
         # Save source to database using user's token for RLS
         try:
@@ -507,9 +519,17 @@ async def process_audio(file: UploadFile, user: dict = Depends(get_current_user)
         # Store transcript in vector database
         store_transcript_in_vector_db(transcription, source="audio_upload", url=file.filename, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
-        
+
+        # Get user's preferred model for summary generation
+        try:
+            preferences = UserPreferencesService.get_user_preferences(user['id'], user['token'])
+            preferred_model = preferences.get('preferred_model', 'gemma3:1b')
+        except Exception as e:
+            logger.warning(f"Could not load user preferences for summary, using default: {str(e)}")
+            preferred_model = 'gemma3:1b'
+
         # Generate summary using Ollama
-        summary = generate_summary_ollama(transcription)
+        summary = generate_summary_ollama(transcription, preferred_model)
         
         return {
             "transcription": transcription,
@@ -569,8 +589,16 @@ async def process_podcast(request: TranscriptionRequest, user: dict = Depends(ge
         store_transcript_in_vector_db(transcription, source="podcast", url=request.podcast_url, user_id=user['id'], vector_db=vector_db)
         logger.info("Transcript stored in vector database")
 
+        # Get user's preferred model for summary generation
+        try:
+            preferences = UserPreferencesService.get_user_preferences(user['id'], user['token'])
+            preferred_model = preferences.get('preferred_model', 'gemma3:1b')
+        except Exception as e:
+            logger.warning(f"Could not load user preferences for summary, using default: {str(e)}")
+            preferred_model = 'gemma3:1b'
+
         # Generate summary
-        summary = generate_summary_ollama(transcription)
+        summary = generate_summary_ollama(transcription, preferred_model)
         logger.info("Summary generated successfully")
 
         # Save source to database using user's token for RLS
@@ -630,7 +658,17 @@ async def chat(request: ChatRequest, user: dict = Depends(get_current_user)):
         # Get user-specific vector database
         vector_db = get_user_vector_db(user['id'])
 
-        response = chat_with_ollama(request.message, vector_db, request.context, request.model)
+        # Use user's preferred model if no specific model provided
+        model_to_use = request.model
+        if not model_to_use or model_to_use == "llama3.2:1b":  # Default fallback
+            try:
+                preferences = UserPreferencesService.get_user_preferences(user['id'], user['token'])
+                model_to_use = preferences.get('preferred_model', 'gemma3:1b')
+            except Exception as e:
+                logger.warning(f"Could not load user preferences, using default: {str(e)}")
+                model_to_use = 'gemma3:1b'
+
+        response = chat_with_ollama(request.message, vector_db, request.context, model_to_use)
         return {"response": response}
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
@@ -741,6 +779,33 @@ async def delete_source(source_id: str, user: dict = Depends(get_current_user)):
         raise
     except Exception as e:
         logger.error(f"Error deleting source: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/user/preferences")
+async def get_user_preferences(user: dict = Depends(get_current_user)):
+    """Get the authenticated user's preferences"""
+    try:
+        preferences = UserPreferencesService.get_user_preferences(user['id'], user['token'])
+        return preferences
+    except Exception as e:
+        logger.error(f"Error fetching user preferences: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/user/preferences")
+async def update_user_preferences(preferences: PreferencesUpdate, user: dict = Depends(get_current_user)):
+    """Update the authenticated user's preferences"""
+    try:
+        updated_preferences = UserPreferencesService.update_user_preferences(
+            user['id'],
+            user['token'],
+            preferences.preferred_model
+        )
+        return updated_preferences
+    except ValueError as e:
+        # Invalid model name
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating user preferences: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
