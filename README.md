@@ -64,36 +64,28 @@ YODA uses Supabase for authentication and storing vector embeddings.
 
 ### 3. Start the Application
 
-Run the startup script to build and start all containers:
+You can run the application in two modes:
 
+**Option A: Production (Docker)**
+Run the entire stack in Docker containers (recommended for deployment).
 ```bash
-./start.sh
+make prod
 ```
+Access at **http://localhost**.
 
-Once started, access the application at **http://localhost**.
+**Option B: Development (Local)**
+Run services locally with hot-reloading (recommended for coding).
+```bash
+make dev
+```
+Access at **http://localhost:5173**.
 
-## 🛠 Development
+**Other Commands:**
+- `make stop`: Stop all services
+- `make logs`: View logs
+- `make setup`: Run setup wizard again
+- `make clean`: Remove all data and artifacts
 
-### Service URLs
-
-| Service | URL | Description |
-|---------|-----|-------------|
-| **Frontend** | http://localhost | Main UI |
-| **Backend** | http://localhost:8000 | FastAPI Docs |
-| **Ollama API** | http://localhost:8001 | LLM Wrapper |
-| **Ollama** | http://localhost:11434 | Direct LLM Access |
-
-### Local Development Mode
-
-To run services locally (useful for debugging):
-
-1.  **Stop Containers**: `docker-compose down`
-2.  **Start Infrastructure**: `docker-compose up -d ollama ollama-api`
-3.  **Run Dev Script**:
-    ```bash
-    ./dev.sh
-    ```
-    This script loads your `.env` file and starts the backend (Python) and frontend (Vite) in development mode with hot-reloading.
 
 ### Troubleshooting Sources
 
