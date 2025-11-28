@@ -69,22 +69,22 @@ You can run the application in two modes:
 **Option A: Production (Docker)**
 Run the entire stack in Docker containers (recommended for deployment).
 ```bash
-make prod
+docker compose up --build -d
 ```
 Access at **http://localhost**.
 
 **Option B: Development (Local)**
 Run services locally with hot-reloading (recommended for coding).
 ```bash
-make dev
+./dev.sh
 ```
 Access at **http://localhost:5173**.
 
 **Other Commands:**
-- `make stop`: Stop all services
-- `make logs`: View logs
-- `make setup`: Run setup wizard again
-- `make clean`: Remove all data and artifacts
+- **Stop**: `docker compose down`
+- **Logs**: `docker compose logs -f`
+- **Setup**: `./setup_supabase_env.sh`
+- **Clean**: `docker compose down -v` (removes all data)
 
 
 ### Troubleshooting Sources
