@@ -7,8 +7,7 @@ YODA is a containerized application that allows you to ingest, transcribe, and q
 The application is fully containerized and consists of:
 
 - **Frontend**: Vue.js application served via nginx
-- **Backend**: FastAPI application with Whisper transcription
-- **Ollama API**: Wrapper service for Ollama LLM
+- **Backend**: FastAPI application with Whisper transcription and direct Ollama integration
 - **Ollama**: Local LLM service for chat and summarization
 - **Supabase**: Authentication and Vector Database (pgvector)
 
@@ -16,8 +15,7 @@ The application is fully containerized and consists of:
 graph LR
     Frontend[Frontend (Vue.js)] --> Backend[Backend (FastAPI)]
     Backend --> Supabase[(Supabase PGVector)]
-    Backend --> OllamaAPI[Ollama API]
-    OllamaAPI --> Ollama[Ollama (LLM)]
+    Backend --> Ollama[Ollama (LLM)]
 ```
 
 ## 🚀 Quick Start
@@ -83,7 +81,6 @@ Access at **http://localhost:5173**.
 **Other Commands:**
 - **Stop**: `docker compose down`
 - **Logs**: `docker compose logs -f`
-- **Setup**: `./setup_supabase_env.sh`
 - **Clean**: `docker compose down -v` (removes all data)
 
 
