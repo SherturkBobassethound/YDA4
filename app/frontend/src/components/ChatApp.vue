@@ -92,9 +92,6 @@ interface ModelInfo {
 const { fetchWithAuth, API_BASE_URL } = useApi()
 const { isAuthenticated } = useAuth()
 
-const OLLAMA_API_URL = import.meta.env.VITE_OLLAMA_API_URL ||
-  (window.location.hostname === 'localhost' ? 'http://localhost:8001' : 'http://ollama-api:8001');
-
 // State
 const messages = ref<Message[]>([]);
 const newMessage = ref('');
@@ -120,7 +117,7 @@ const availableModels = ref<ModelInfo[]>([
 // Fetch available models on component mount
 onMounted(async () => {
   try {
-    const response = await fetch(`${OLLAMA_API_URL}/models`, {
+    const response = await fetch(`${API_BASE_URL}/models`, {
       signal: AbortSignal.timeout(10000)
     });
 

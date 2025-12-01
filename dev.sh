@@ -68,7 +68,7 @@ else
     # Ollama is not running, try to start it with Docker if available
     if command_exists "docker" && docker info >/dev/null 2>&1; then
         echo -e "${YELLOW}Starting Ollama in Docker...${NC}"
-        docker-compose -f docker-compose.dev.yml up -d
+        docker-compose up -d ollama
 
         # Wait for Ollama to be ready
         RETRY_COUNT=0
@@ -86,11 +86,11 @@ else
 
         # Check if models are installed
         echo -e "${YELLOW}Checking Ollama models...${NC}"
-        if docker exec ollama_service_dev ollama list 2>/dev/null | grep -q "llama3.2:1b"; then
+        if docker exec ollama_service ollama list 2>/dev/null | grep -q "llama3.2:1b"; then
             echo -e "${GREEN}✓ Ollama models found${NC}\n"
         else
             echo -e "${YELLOW}Installing default Ollama model (llama3.2:1b)...${NC}"
-            docker exec ollama_service_dev ollama pull llama3.2:1b
+            docker exec ollama_service ollama pull llama3.2:1b
             echo -e "${GREEN}✓ Model installed${NC}\n"
         fi
     else
@@ -124,18 +124,6 @@ else
 fi
 cd ../..
 
-# Install Python dependencies for ollama-service
-echo -e "${YELLOW}Installing ollama-service dependencies...${NC}"
-cd app/ollama-service
-if [ ! -f ".deps_installed" ] || [ requirements.txt -nt .deps_installed ]; then
-    pip install -q -r requirements.txt
-    touch .deps_installed
-    echo -e "${GREEN}✓ Ollama-service dependencies installed${NC}"
-else
-    echo -e "${GREEN}✓ Ollama-service dependencies up to date${NC}"
-fi
-cd ../..
-
 # Install frontend dependencies
 echo -e "${YELLOW}Installing frontend dependencies...${NC}"
 cd app/frontend
@@ -154,20 +142,10 @@ echo -e "${BLUE}================================${NC}\n"
 # Create log directory
 mkdir -p logs
 
-# Start Ollama API service
-echo -e "${GREEN}Starting Ollama API (port 8001)...${NC}"
-cd app/ollama-service
-OLLAMA_BASE_URL=http://localhost:11434 uvicorn ollama_service:app --reload --host 0.0.0.0 --port 8001 > ../../logs/ollama-api.log 2>&1 &
-OLLAMA_API_PID=$!
-cd ../..
-
-# Wait for ollama-api to start
-sleep 3
-
 # Start Backend API
 echo -e "${GREEN}Starting Backend API (port 8000)...${NC}"
 cd app/backend
-OLLAMA_API_URL=http://localhost:8001 uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
+OLLAMA_BASE_URL=http://localhost:11434 uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
 BACKEND_PID=$!
 cd ../..
 
@@ -177,7 +155,7 @@ sleep 3
 # Start Frontend
 echo -e "${GREEN}Starting Frontend (port 5173)...${NC}"
 cd app/frontend
-VITE_API_BASE_URL=http://localhost:8000 VITE_OLLAMA_API_URL=http://localhost:8001 npm run dev > ../../logs/frontend.log 2>&1 &
+VITE_API_BASE_URL=http://localhost:8000 npm run dev > ../../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 cd ../..
 
@@ -188,12 +166,10 @@ echo -e "${BLUE}================================${NC}\n"
 echo -e "${YELLOW}Service URLs:${NC}"
 echo -e "  Frontend:    ${GREEN}http://localhost:5173${NC}"
 echo -e "  Backend API: ${GREEN}http://localhost:8000${NC}"
-echo -e "  Ollama API:  ${GREEN}http://localhost:8001${NC}"
 echo -e "  Ollama:      ${GREEN}http://localhost:11434${NC}\n"
 
 echo -e "${YELLOW}Logs:${NC}"
 echo -e "  Backend:     ${GREEN}tail -f logs/backend.log${NC}"
-echo -e "  Ollama API:  ${GREEN}tail -f logs/ollama-api.log${NC}"
 echo -e "  Frontend:    ${GREEN}tail -f logs/frontend.log${NC}\n"
 
 echo -e "${YELLOW}Press Ctrl+C to stop all services${NC}\n"
