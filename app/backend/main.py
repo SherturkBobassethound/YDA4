@@ -22,8 +22,8 @@ from auth import get_current_user
 # Initialize components
 embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# Get service URLs from environment variables with fallbacks for local development
-OLLAMA_API_URL = os.getenv('OLLAMA_API_URL', 'http://localhost:8001')
+# Get Ollama base URL from environment variables with fallbacks for local development
+OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
 
 # Initialize services
 text_splitter = TextSplitter(chunk_size=500, chunk_overlap=50)
@@ -289,7 +289,7 @@ def transcribe_audio(audio_path: str) -> str:
         raise HTTPException(status_code=400, detail=f"Failed to transcribe audio: {str(e)}")
 
 def generate_summary_ollama(text: str, model_name: str = "llama3.2:1b") -> str:
-    """Generate summary using Ollama through the API service"""
+    """Generate summary using Ollama directly"""
     logger.info(f"Starting summary generation with Ollama model: {model_name}")
     try:
         # Truncate very long texts to avoid memory issues
@@ -298,31 +298,34 @@ def generate_summary_ollama(text: str, model_name: str = "llama3.2:1b") -> str:
             text = text[:max_length] + "... [truncated for processing]"
             logger.info(f"Text truncated to {max_length} characters for processing")
         
+        prompt = f"Please provide a concise summary of the following text, highlighting the key learnings and main points:\n\n{text}"
+        
         response = requests.post(
-            f"{OLLAMA_API_URL}/chat",
+            f"{OLLAMA_BASE_URL}/api/generate",
             json={
-                "message": f"Please provide a concise summary of the following text, highlighting the key learnings and main points:\n\n{text}",
                 "model": model_name,
-                "system_prompt": "You are a helpful assistant that provides clear, concise summaries."
+                "prompt": prompt,
+                "system": "You are a helpful assistant that provides clear, concise summaries.",
+                "stream": False
             },
             timeout=300  # 5 minute timeout for summary generation
         )
         response.raise_for_status()
         result = response.json()
         logger.info("Summary generated successfully with Ollama")
-        return result["response"]
+        return result.get("response", "No response received")
     except requests.exceptions.Timeout:
         logger.error("Timeout while generating summary with Ollama")
         raise HTTPException(status_code=408, detail="Summary generation timed out. The content might be too long.")
     except requests.exceptions.ConnectionError:
-        logger.error("Cannot connect to Ollama API service.")
-        raise HTTPException(status_code=503, detail="Cannot connect to Ollama API service. Please make sure the service is running.")
+        logger.error("Cannot connect to Ollama service.")
+        raise HTTPException(status_code=503, detail="Cannot connect to Ollama service. Please make sure the service is running.")
     except Exception as e:
         logger.error(f"Error generating summary with Ollama: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
 def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = None, model_name: str = "llama3.2:1b") -> str:
-    """Chat with Ollama model through the API service, with enhanced context from vector DB"""
+    """Chat with Ollama model directly, with enhanced context from vector DB"""
     logger.info(f"Starting chat with Ollama model: {model_name}")
 
     # Always search vector DB for relevant chunks, regardless of context
@@ -370,24 +373,25 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
             prompt = f"User question: {message}\n\nNote: I don't have any sources available to answer this question. Please let the user know they should add sources (YouTube videos, podcasts, or audio files) before asking questions."
             
         response = requests.post(
-            f"{OLLAMA_API_URL}/chat",
+            f"{OLLAMA_BASE_URL}/api/generate",
             json={
-                "message": prompt,
                 "model": model_name,
-                "system_prompt": "You are a helpful assistant that answers questions accurately and concisely based on the provided context."
+                "prompt": prompt,
+                "system": "You are a helpful assistant that answers questions accurately and concisely based on the provided context.",
+                "stream": False
             },
             timeout=120  # 2 minute timeout for chat
         )
         response.raise_for_status()
         result = response.json()
         logger.info("Chat response generated successfully")
-        return result["response"]
+        return result.get("response", "No response received")
     except requests.exceptions.Timeout:
         logger.error("Timeout while generating chat response")
         raise HTTPException(status_code=408, detail="Response generation timed out. Please try a simpler question.")
     except requests.exceptions.ConnectionError:
-        logger.error("Cannot connect to Ollama API service for chat")
-        raise HTTPException(status_code=503, detail="Cannot connect to Ollama API service. Please make sure the service is running.")
+        logger.error("Cannot connect to Ollama service for chat")
+        raise HTTPException(status_code=503, detail="Cannot connect to Ollama service. Please make sure the service is running.")
     except Exception as e:
         logger.error(f"Error in chat with Ollama: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate chat response: {str(e)}")
@@ -424,9 +428,12 @@ def store_transcript_in_vector_db(transcript: str, source_id: str, source: str, 
 async def get_models():
     """Get available Ollama models"""
     try:
-        response = requests.get(f"{OLLAMA_API_URL}/models", timeout=30)
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=30)
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.ConnectionError:
+        logger.error("Cannot connect to Ollama service")
+        raise HTTPException(status_code=503, detail="Cannot connect to Ollama service. Please make sure the service is running.")
     except Exception as e:
         logger.error(f"Error fetching models: {str(e)}")
         raise HTTPException(status_code=503, detail="Could not fetch available models")
@@ -782,16 +789,17 @@ async def health_check():
     status = {
         "status": "healthy",
         "whisper": "loaded",
-        "ollama_api": "disconnected",
+        "ollama": "disconnected",
         "supabase": "disconnected"
     }
 
     try:
-        # Check if Ollama API service is running
-        response = requests.get(f"{OLLAMA_API_URL}/models", timeout=5)
-        status["ollama_api"] = "connected" if response.status_code == 200 else "disconnected"
+        # Check if Ollama service is running
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/version", timeout=5)
+        status["ollama"] = "connected" if response.status_code == 200 else "disconnected"
     except Exception as e:
-        logger.warning(f"Ollama API health check failed: {str(e)}")
+        logger.warning(f"Ollama health check failed: {str(e)}")
+        status["ollama"] = "disconnected"
 
     try:
         # Check if Supabase is accessible

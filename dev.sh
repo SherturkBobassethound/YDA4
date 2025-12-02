@@ -3,7 +3,8 @@
 # Local Development Startup Script
 # Starts all services for local development with hot-reload
 
-set -e
+# Don't exit on error - we want to see what's happening
+set +e
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -68,7 +69,7 @@ else
     # Ollama is not running, try to start it with Docker if available
     if command_exists "docker" && docker info >/dev/null 2>&1; then
         echo -e "${YELLOW}Starting Ollama in Docker...${NC}"
-        docker-compose -f docker-compose.dev.yml up -d
+        docker-compose up -d ollama
 
         # Wait for Ollama to be ready
         RETRY_COUNT=0
@@ -86,11 +87,11 @@ else
 
         # Check if models are installed
         echo -e "${YELLOW}Checking Ollama models...${NC}"
-        if docker exec ollama_service_dev ollama list 2>/dev/null | grep -q "llama3.2:1b"; then
+        if docker exec ollama_service ollama list 2>/dev/null | grep -q "llama3.2:1b"; then
             echo -e "${GREEN}✓ Ollama models found${NC}\n"
         else
             echo -e "${YELLOW}Installing default Ollama model (llama3.2:1b)...${NC}"
-            docker exec ollama_service_dev ollama pull llama3.2:1b
+            docker exec ollama_service ollama pull llama3.2:1b
             echo -e "${GREEN}✓ Model installed${NC}\n"
         fi
     else
@@ -124,18 +125,6 @@ else
 fi
 cd ../..
 
-# Install Python dependencies for ollama-service
-echo -e "${YELLOW}Installing ollama-service dependencies...${NC}"
-cd app/ollama-service
-if [ ! -f ".deps_installed" ] || [ requirements.txt -nt .deps_installed ]; then
-    pip install -q -r requirements.txt
-    touch .deps_installed
-    echo -e "${GREEN}✓ Ollama-service dependencies installed${NC}"
-else
-    echo -e "${GREEN}✓ Ollama-service dependencies up to date${NC}"
-fi
-cd ../..
-
 # Install frontend dependencies
 echo -e "${YELLOW}Installing frontend dependencies...${NC}"
 cd app/frontend
@@ -154,32 +143,37 @@ echo -e "${BLUE}================================${NC}\n"
 # Create log directory
 mkdir -p logs
 
-# Start Ollama API service
-echo -e "${GREEN}Starting Ollama API (port 8001)...${NC}"
-cd app/ollama-service
-OLLAMA_BASE_URL=http://localhost:11434 uvicorn ollama_service:app --reload --host 0.0.0.0 --port 8001 > ../../logs/ollama-api.log 2>&1 &
-OLLAMA_API_PID=$!
-cd ../..
-
-# Wait for ollama-api to start
-sleep 3
-
 # Start Backend API
 echo -e "${GREEN}Starting Backend API (port 8000)...${NC}"
-cd app/backend
-OLLAMA_API_URL=http://localhost:8001 uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
+cd app/backend || exit 1
+OLLAMA_BASE_URL=http://localhost:11434 uvicorn main:app --reload --host 0.0.0.0 --port 8000 >> ../../logs/backend.log 2>&1 &
 BACKEND_PID=$!
-cd ../..
+echo -e "${GREEN}Backend PID: $BACKEND_PID${NC}"
+cd ../.. || exit 1
 
 # Wait for backend to start
+echo -e "${YELLOW}Waiting for backend to start...${NC}"
 sleep 3
+
+# Verify backend is running
+if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
+    echo -e "${YELLOW}Backend is starting (may take a moment)...${NC}"
+    sleep 2
+fi
 
 # Start Frontend
 echo -e "${GREEN}Starting Frontend (port 5173)...${NC}"
-cd app/frontend
-VITE_API_BASE_URL=http://localhost:8000 VITE_OLLAMA_API_URL=http://localhost:8001 npm run dev > ../../logs/frontend.log 2>&1 &
+cd app/frontend || exit 1
+VITE_API_BASE_URL=http://localhost:8000 npm run dev >> ../../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
-cd ../..
+echo -e "${GREEN}Frontend PID: $FRONTEND_PID${NC}"
+cd ../.. || exit 1
+
+# Wait a moment for frontend to start
+sleep 2
+
+# Ensure log files exist
+touch logs/backend.log logs/frontend.log 2>/dev/null || true
 
 echo -e "\n${BLUE}================================${NC}"
 echo -e "${GREEN}✓ All services started!${NC}"
@@ -188,15 +182,48 @@ echo -e "${BLUE}================================${NC}\n"
 echo -e "${YELLOW}Service URLs:${NC}"
 echo -e "  Frontend:    ${GREEN}http://localhost:5173${NC}"
 echo -e "  Backend API: ${GREEN}http://localhost:8000${NC}"
-echo -e "  Ollama API:  ${GREEN}http://localhost:8001${NC}"
 echo -e "  Ollama:      ${GREEN}http://localhost:11434${NC}\n"
 
-echo -e "${YELLOW}Logs:${NC}"
-echo -e "  Backend:     ${GREEN}tail -f logs/backend.log${NC}"
-echo -e "  Ollama API:  ${GREEN}tail -f logs/ollama-api.log${NC}"
-echo -e "  Frontend:    ${GREEN}tail -f logs/frontend.log${NC}\n"
+echo -e "${YELLOW}Viewing combined logs (Ctrl+C to stop all services):${NC}\n"
+echo -e "${YELLOW}----------------------------------------${NC}\n"
 
+# Enhanced cleanup function
+cleanup() {
+    echo -e "\n\n${YELLOW}Shutting down services...${NC}"
+    kill $BACKEND_PID 2>/dev/null || true
+    kill $FRONTEND_PID 2>/dev/null || true
+    # Kill any tail processes
+    pkill -P $$ tail 2>/dev/null || true
+    exit 0
+}
+
+trap cleanup SIGINT SIGTERM
+
+# Show initial log content if available
+echo -e "${BLUE}=== Checking services... ===${NC}"
+if [ -s logs/backend.log ]; then
+    echo -e "${BLUE}Backend log found (showing last 5 lines):${NC}"
+    tail -n 5 logs/backend.log
+    echo ""
+else
+    echo -e "${YELLOW}Backend log is empty (service may still be starting)${NC}"
+fi
+
+if [ -s logs/frontend.log ]; then
+    echo -e "${GREEN}Frontend log found (showing last 5 lines):${NC}"
+    tail -n 5 logs/frontend.log
+    echo ""
+else
+    echo -e "${YELLOW}Frontend log is empty (service may still be starting)${NC}"
+fi
+echo ""
+
+echo -e "${YELLOW}=== Following logs (live updates) ===${NC}"
+echo -e "${YELLOW}If you see a blank screen, the services are starting...${NC}"
+echo -e "${YELLOW}Logs will appear here as services generate output.${NC}\n"
 echo -e "${YELLOW}Press Ctrl+C to stop all services${NC}\n"
+echo -e "${YELLOW}----------------------------------------${NC}\n"
 
-# Wait for all background jobs
-wait
+# Tail both log files - tail will show which file each line comes from
+# The '==> filename <==' headers will show which service each line is from
+tail -f logs/backend.log logs/frontend.log

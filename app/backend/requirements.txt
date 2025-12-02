@@ -30,6 +30,7 @@ beautifulsoup4==4.13.3
 feedparser==6.0.11
 requests==2.32.3
 selenium==4.31.0
+httpx==0.28.1
 
 # Document processing
 pymupdf==1.25.4
