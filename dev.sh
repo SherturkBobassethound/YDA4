@@ -3,7 +3,8 @@
 # Local Development Startup Script
 # Starts all services for local development with hot-reload
 
-set -e
+# Don't exit on error - we want to see what's happening
+set +e
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -144,10 +145,11 @@ mkdir -p logs
 
 # Start Backend API
 echo -e "${GREEN}Starting Backend API (port 8000)...${NC}"
-cd app/backend
-OLLAMA_BASE_URL=http://localhost:11434 uvicorn main:app --reload --host 0.0.0.0 --port 8000 > ../../logs/backend.log 2>&1 &
+cd app/backend || exit 1
+OLLAMA_BASE_URL=http://localhost:11434 uvicorn main:app --reload --host 0.0.0.0 --port 8000 >> ../../logs/backend.log 2>&1 &
 BACKEND_PID=$!
-cd ../..
+echo -e "${GREEN}Backend PID: $BACKEND_PID${NC}"
+cd ../.. || exit 1
 
 # Wait for backend to start
 echo -e "${YELLOW}Waiting for backend to start...${NC}"
@@ -161,16 +163,17 @@ fi
 
 # Start Frontend
 echo -e "${GREEN}Starting Frontend (port 5173)...${NC}"
-cd app/frontend
-VITE_API_BASE_URL=http://localhost:8000 npm run dev > ../../logs/frontend.log 2>&1 &
+cd app/frontend || exit 1
+VITE_API_BASE_URL=http://localhost:8000 npm run dev >> ../../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
-cd ../..
+echo -e "${GREEN}Frontend PID: $FRONTEND_PID${NC}"
+cd ../.. || exit 1
 
 # Wait a moment for frontend to start
 sleep 2
 
 # Ensure log files exist
-touch logs/backend.log logs/frontend.log
+touch logs/backend.log logs/frontend.log 2>/dev/null || true
 
 echo -e "\n${BLUE}================================${NC}"
 echo -e "${GREEN}✓ All services started!${NC}"
@@ -186,8 +189,9 @@ echo -e "${YELLOW}----------------------------------------${NC}\n"
 
 # Enhanced cleanup function
 cleanup() {
-    echo -e "\n${YELLOW}Shutting down services...${NC}"
-    kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true
+    echo -e "\n\n${YELLOW}Shutting down services...${NC}"
+    kill $BACKEND_PID 2>/dev/null || true
+    kill $FRONTEND_PID 2>/dev/null || true
     # Kill any tail processes
     pkill -P $$ tail 2>/dev/null || true
     exit 0
@@ -195,5 +199,31 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
+# Show initial log content if available
+echo -e "${BLUE}=== Checking services... ===${NC}"
+if [ -s logs/backend.log ]; then
+    echo -e "${BLUE}Backend log found (showing last 5 lines):${NC}"
+    tail -n 5 logs/backend.log
+    echo ""
+else
+    echo -e "${YELLOW}Backend log is empty (service may still be starting)${NC}"
+fi
+
+if [ -s logs/frontend.log ]; then
+    echo -e "${GREEN}Frontend log found (showing last 5 lines):${NC}"
+    tail -n 5 logs/frontend.log
+    echo ""
+else
+    echo -e "${YELLOW}Frontend log is empty (service may still be starting)${NC}"
+fi
+echo ""
+
+echo -e "${YELLOW}=== Following logs (live updates) ===${NC}"
+echo -e "${YELLOW}If you see a blank screen, the services are starting...${NC}"
+echo -e "${YELLOW}Logs will appear here as services generate output.${NC}\n"
+echo -e "${YELLOW}Press Ctrl+C to stop all services${NC}\n"
+echo -e "${YELLOW}----------------------------------------${NC}\n"
+
 # Tail both log files - tail will show which file each line comes from
-tail -f logs/backend.log logs/frontend.log 2>/dev/null
+# The '==> filename <==' headers will show which service each line is from
+tail -f logs/backend.log logs/frontend.log
