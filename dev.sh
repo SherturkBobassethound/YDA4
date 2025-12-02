@@ -150,7 +150,14 @@ BACKEND_PID=$!
 cd ../..
 
 # Wait for backend to start
+echo -e "${YELLOW}Waiting for backend to start...${NC}"
 sleep 3
+
+# Verify backend is running
+if ! curl -s http://localhost:8000/health >/dev/null 2>&1; then
+    echo -e "${YELLOW}Backend is starting (may take a moment)...${NC}"
+    sleep 2
+fi
 
 # Start Frontend
 echo -e "${GREEN}Starting Frontend (port 5173)...${NC}"
@@ -158,6 +165,12 @@ cd app/frontend
 VITE_API_BASE_URL=http://localhost:8000 npm run dev > ../../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 cd ../..
+
+# Wait a moment for frontend to start
+sleep 2
+
+# Ensure log files exist
+touch logs/backend.log logs/frontend.log
 
 echo -e "\n${BLUE}================================${NC}"
 echo -e "${GREEN}✓ All services started!${NC}"
@@ -168,11 +181,19 @@ echo -e "  Frontend:    ${GREEN}http://localhost:5173${NC}"
 echo -e "  Backend API: ${GREEN}http://localhost:8000${NC}"
 echo -e "  Ollama:      ${GREEN}http://localhost:11434${NC}\n"
 
-echo -e "${YELLOW}Logs:${NC}"
-echo -e "  Backend:     ${GREEN}tail -f logs/backend.log${NC}"
-echo -e "  Frontend:    ${GREEN}tail -f logs/frontend.log${NC}\n"
+echo -e "${YELLOW}Viewing combined logs (Ctrl+C to stop all services):${NC}\n"
+echo -e "${YELLOW}----------------------------------------${NC}\n"
 
-echo -e "${YELLOW}Press Ctrl+C to stop all services${NC}\n"
+# Enhanced cleanup function
+cleanup() {
+    echo -e "\n${YELLOW}Shutting down services...${NC}"
+    kill $BACKEND_PID $FRONTEND_PID 2>/dev/null || true
+    # Kill any tail processes
+    pkill -P $$ tail 2>/dev/null || true
+    exit 0
+}
 
-# Wait for all background jobs
-wait
+trap cleanup SIGINT SIGTERM
+
+# Tail both log files - tail will show which file each line comes from
+tail -f logs/backend.log logs/frontend.log 2>/dev/null
