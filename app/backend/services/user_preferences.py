@@ -7,20 +7,10 @@ from typing import Optional, Dict
 from supabase import Client
 from .supabase_client import get_user_supabase_client
 
-# Available models that users can select
+# Available models that users can select (fixed list)
 AVAILABLE_MODELS = [
-    "gemma3:1b",
-    "gemma3:4b",
-    "gemma3:12b",
-    "gemma3:27b",
-    "qwen3:1.7b",
-    "qwen3:4b",
-    "qwen3:8b",
-    "qwen3:14b",
-    "qwen3:30b",
-    "llama3.2:1b",  # Legacy model
-    "llama3.2:3b",  # Legacy model
-    "llama3:8b",    # Legacy model
+    "gemma3:1b",     # Small, fast model (~815MB)
+    "qwen3:1.7b",    # Slightly larger, good balance (~1.3GB)
 ]
 
 DEFAULT_MODEL = "gemma3:1b"

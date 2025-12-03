@@ -9,24 +9,10 @@ export interface ModelOption {
   family: 'gemma3' | 'qwen3' | 'llama'
 }
 
+// Fixed list of available models (must match backend)
 export const AVAILABLE_MODELS: ModelOption[] = [
-  // Gemma 3 models
-  { name: 'gemma3:1b', size: '~1GB', description: 'Smallest Gemma - fastest responses', family: 'gemma3' },
-  { name: 'gemma3:4b', size: '~4GB', description: 'Balanced Gemma - good quality and speed', family: 'gemma3' },
-  { name: 'gemma3:12b', size: '~12GB', description: 'Large Gemma - high quality', family: 'gemma3' },
-  { name: 'gemma3:27b', size: '~27GB', description: 'Largest Gemma - best quality', family: 'gemma3' },
-
-  // Qwen 3 models
-  { name: 'qwen3:1.7b', size: '~1.7GB', description: 'Smallest Qwen - very fast', family: 'qwen3' },
-  { name: 'qwen3:4b', size: '~4GB', description: 'Balanced Qwen - good quality', family: 'qwen3' },
-  { name: 'qwen3:8b', size: '~8GB', description: 'Mid-size Qwen - excellent balance', family: 'qwen3' },
-  { name: 'qwen3:14b', size: '~14GB', description: 'Large Qwen - very high quality', family: 'qwen3' },
-  { name: 'qwen3:30b', size: '~30GB', description: 'Largest Qwen - exceptional quality', family: 'qwen3' },
-
-  // Legacy Llama models (for backward compatibility)
-  { name: 'llama3.2:1b', size: '~1.3GB', description: 'Legacy - lightweight', family: 'llama' },
-  { name: 'llama3.2:3b', size: '~3GB', description: 'Legacy - balanced', family: 'llama' },
-  { name: 'llama3:8b', size: '~4.7GB', description: 'Legacy - high quality', family: 'llama' },
+  { name: 'gemma3:1b', size: '~815MB', description: 'Small, fast model - best for quick responses', family: 'gemma3' },
+  { name: 'qwen3:1.7b', size: '~1.3GB', description: 'Slightly larger - better quality responses', family: 'qwen3' },
 ]
 
 interface UserPreferences {

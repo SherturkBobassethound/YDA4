@@ -7,17 +7,6 @@
 
     <!-- Chat Section -->
     <div v-if="isAuthenticated" class="chat-section">
-      <!-- Model Selection -->
-      <div class="model-selection">
-        <label for="model-select">AI Model:</label>
-        <select id="model-select" v-model="selectedModel" @change="onModelChange">
-          <option v-for="model in availableModels" :key="model.name" :value="model.name">
-            {{ model.name }} ({{ model.size }})
-          </option>
-        </select>
-        <span class="model-info">{{ getModelDescription(selectedModel) }}</span>
-      </div>
-
       <!-- Transcription Summary (only shown when content is processed) -->
       <div v-if="hasTranscription" class="transcription-summary">
         <h4>Summary</h4>
@@ -76,7 +65,7 @@
 import { ref, nextTick, onMounted, watch } from 'vue';
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
-import { usePreferences, type ModelOption } from '../composables/usePreferences'
+import { usePreferences } from '../composables/usePreferences'
 
 interface Message {
   sender: 'user' | 'machine';
@@ -88,10 +77,7 @@ const { fetchWithAuth, API_BASE_URL } = useApi()
 const { isAuthenticated } = useAuth()
 const {
   preferredModel,
-  availableModels: prefsAvailableModels,
   loadPreferences,
-  setPreferredModel,
-  getModelInfo
 } = usePreferences()
 
 // State
@@ -108,70 +94,22 @@ const transcription = ref('');
 const summary = ref('');
 const showFullTranscription = ref(false);
 
-// Model selection state - use preferences from composable
-const selectedModel = ref('gemma3:1b'); // Default lightweight model
-const availableModels = ref<ModelOption[]>(prefsAvailableModels);
+// Model selection state - synced from sidebar preferences
+const selectedModel = ref('gemma3:1b');
 
 // Load user preferences on component mount
 onMounted(async () => {
-  // Load user preferences if authenticated
   if (isAuthenticated.value) {
     await loadPreferences();
     selectedModel.value = preferredModel.value;
   }
-
-  // Optionally: Fetch installed models from Ollama to update size info
-  try {
-    const response = await fetch(`${API_BASE_URL}/models`, {
-      signal: AbortSignal.timeout(10000)
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.models && Array.isArray(data.models)) {
-        // Create a map of installed models with their actual sizes
-        const installedMap = new Map(
-          data.models.map((m: any) => [m.name, m.size ? formatBytes(m.size) : null])
-        );
-
-        // Update available models with actual installed sizes
-        availableModels.value = prefsAvailableModels.map(model => {
-          const installedSize = installedMap.get(model.name);
-          return installedSize ? { ...model, size: installedSize } : model;
-        });
-      }
-    }
-  } catch (error) {
-    console.warn('Could not fetch installed models info, using defaults:', error);
-  }
 });
 
-// Helper functions
-const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-};
-
-const getModelDescription = (modelName: string): string => {
-  const modelInfo = getModelInfo(modelName);
-  return modelInfo?.description || 'General purpose model';
-};
-
-const onModelChange = async () => {
-  console.log('Model changed to:', selectedModel.value);
-  // Save the new preference to backend
-  if (isAuthenticated.value) {
-    const success = await setPreferredModel(selectedModel.value);
-    if (success) {
-      console.log('Model preference saved successfully');
-    } else {
-      console.error('Failed to save model preference');
-    }
-  }
-};
+// Watch for model changes from the sidebar
+watch(preferredModel, (newModel) => {
+  selectedModel.value = newModel;
+  console.log('Model preference updated from sidebar:', newModel);
+});
 
 // Handle transcription data from Sidebar
 const handleTranscriptionComplete = (data: { transcription: string; summary: string }) => {
