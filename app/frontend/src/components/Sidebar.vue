@@ -49,81 +49,16 @@
         </div>
       </div>
     </div>
-
-    <!-- Model Settings -->
-    <div v-if="isAuthenticated" class="model-settings">
-      <h4>Model Settings</h4>
-      <div class="model-selection">
-        <label for="sidebar-model-select">Preferred AI Model:</label>
-        <select
-          id="sidebar-model-select"
-          v-model="selectedModel"
-          @change="onModelChange"
-          :disabled="isLoadingPreferences"
-        >
-          <optgroup v-for="family in modelFamilies" :key="family.name" :label="family.label">
-            <option
-              v-for="model in family.models"
-              :key="model.name"
-              :value="model.name"
-            >
-              {{ model.name }} ({{ model.size }})
-            </option>
-          </optgroup>
-        </select>
-        <p class="model-description">{{ selectedModelDescription }}</p>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
-import { usePreferences, type ModelOption } from '../composables/usePreferences'
 
 const { fetchWithAuth, API_BASE_URL } = useApi()
 const { isAuthenticated } = useAuth()
-const {
-  preferredModel,
-  isLoading: isLoadingPreferences,
-  availableModels,
-  loadPreferences,
-  setPreferredModel,
-  getModelInfo
-} = usePreferences()
-
-// Model selection state
-const selectedModel = ref('gemma3:1b')
-
-// Organize models by family for grouped select
-const modelFamilies = computed(() => {
-  const gemma3 = availableModels.filter(m => m.family === 'gemma3')
-  const qwen3 = availableModels.filter(m => m.family === 'qwen3')
-  const llama = availableModels.filter(m => m.family === 'llama')
-
-  return [
-    { name: 'gemma3', label: 'Gemma 3 Models', models: gemma3 },
-    { name: 'qwen3', label: 'Qwen 3 Models', models: qwen3 },
-    { name: 'llama', label: 'Legacy Llama Models', models: llama }
-  ].filter(family => family.models.length > 0)
-})
-
-const selectedModelDescription = computed(() => {
-  const modelInfo = getModelInfo(selectedModel.value)
-  return modelInfo?.description || ''
-})
-
-const onModelChange = async () => {
-  console.log('Model preference changed to:', selectedModel.value)
-  const success = await setPreferredModel(selectedModel.value)
-  if (success) {
-    console.log('Model preference saved successfully')
-  } else {
-    console.error('Failed to save model preference')
-  }
-}
 
 // Universal URL processing state
 const universalUrl = ref('');
@@ -154,25 +89,9 @@ onMounted(async () => {
   // Check status every 30 seconds
   setInterval(checkApiStatus, 30000);
 
-  // Load user's sources and preferences if authenticated
+  // Load user's sources if authenticated
   if (isAuthenticated.value) {
     await loadSources();
-    await loadPreferences();
-    selectedModel.value = preferredModel.value;
-  }
-});
-
-// Watch for authentication changes and load sources when user logs in
-watch(isAuthenticated, async (newValue, oldValue) => {
-  if (newValue && !oldValue) {
-    // User just logged in
-    await loadSources();
-    await loadPreferences();
-    selectedModel.value = preferredModel.value;
-  } else if (!newValue && oldValue) {
-    // User just logged out
-    sources.value = [];
-    selectedModel.value = 'gemma3:1b'; // Reset to default
   }
 });
 

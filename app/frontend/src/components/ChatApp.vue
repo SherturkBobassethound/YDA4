@@ -7,6 +7,17 @@
 
     <!-- Chat Section -->
     <div v-if="isAuthenticated" class="chat-section">
+      <!-- Model Selection -->
+      <div class="model-selection">
+        <label for="model-select">AI Model:</label>
+        <select id="model-select" v-model="selectedModel" @change="onModelChange">
+          <option v-for="model in availableModels" :key="model.name" :value="model.name">
+            {{ model.name }} ({{ model.size }})
+          </option>
+        </select>
+        <span class="model-info">{{ getModelDescription(selectedModel) }}</span>
+      </div>
+
       <!-- Transcription Summary (only shown when content is processed) -->
       <div v-if="hasTranscription" class="transcription-summary">
         <h4>Summary</h4>
@@ -62,10 +73,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, watch } from 'vue';
+import { ref, nextTick, onMounted } from 'vue';
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
-import { usePreferences } from '../composables/usePreferences'
+import { usePreferences, type ModelOption } from '../composables/usePreferences'
 
 interface Message {
   sender: 'user' | 'machine';
@@ -77,7 +88,10 @@ const { fetchWithAuth, API_BASE_URL } = useApi()
 const { isAuthenticated } = useAuth()
 const {
   preferredModel,
+  availableModels: prefsAvailableModels,
   loadPreferences,
+  setPreferredModel,
+  getModelInfo
 } = usePreferences()
 
 // State
@@ -94,8 +108,9 @@ const transcription = ref('');
 const summary = ref('');
 const showFullTranscription = ref(false);
 
-// Model selection state - synced from sidebar preferences
+// Model selection state
 const selectedModel = ref('gemma3:1b');
+const availableModels = ref<ModelOption[]>(prefsAvailableModels);
 
 // Load user preferences on component mount
 onMounted(async () => {
@@ -105,11 +120,24 @@ onMounted(async () => {
   }
 });
 
-// Watch for model changes from the sidebar
-watch(preferredModel, (newModel) => {
-  selectedModel.value = newModel;
-  console.log('Model preference updated from sidebar:', newModel);
-});
+// Helper functions
+const getModelDescription = (modelName: string): string => {
+  const modelInfo = getModelInfo(modelName);
+  return modelInfo?.description || 'General purpose model';
+};
+
+const onModelChange = async () => {
+  console.log('Model changed to:', selectedModel.value);
+  // Save the new preference to backend
+  if (isAuthenticated.value) {
+    const success = await setPreferredModel(selectedModel.value);
+    if (success) {
+      console.log('Model preference saved successfully');
+    } else {
+      console.error('Failed to save model preference');
+    }
+  }
+};
 
 // Handle transcription data from Sidebar
 const handleTranscriptionComplete = (data: { transcription: string; summary: string }) => {
