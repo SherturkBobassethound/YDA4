@@ -73,9 +73,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from 'vue';
+import { ref, nextTick, onMounted, watch } from 'vue';
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
+import { usePreferences, type ModelOption } from '../composables/usePreferences'
 
 interface Message {
   sender: 'user' | 'machine';
@@ -83,14 +84,15 @@ interface Message {
   model?: string;
 }
 
-interface ModelInfo {
-  name: string;
-  size: string;
-  description: string;
-}
-
 const { fetchWithAuth, API_BASE_URL } = useApi()
 const { isAuthenticated } = useAuth()
+const {
+  preferredModel,
+  availableModels: prefsAvailableModels,
+  loadPreferences,
+  setPreferredModel,
+  getModelInfo
+} = usePreferences()
 
 // State
 const messages = ref<Message[]>([]);
@@ -106,16 +108,19 @@ const transcription = ref('');
 const summary = ref('');
 const showFullTranscription = ref(false);
 
-// Model selection state
-const selectedModel = ref('llama3.2:1b'); // Default lightweight model
-const availableModels = ref<ModelInfo[]>([
-  { name: 'llama3.2:1b', size: '~1.3GB', description: 'Lightweight, fast responses' },
-  { name: 'llama3.2:3b', size: '~3GB', description: 'Better quality, balanced performance' },
-  { name: 'llama3:8b', size: '~4.7GB', description: 'High quality, slower responses' }
-]);
+// Model selection state - use preferences from composable
+const selectedModel = ref('gemma3:1b'); // Default lightweight model
+const availableModels = ref<ModelOption[]>(prefsAvailableModels);
 
-// Fetch available models on component mount
+// Load user preferences on component mount
 onMounted(async () => {
+  // Load user preferences if authenticated
+  if (isAuthenticated.value) {
+    await loadPreferences();
+    selectedModel.value = preferredModel.value;
+  }
+
+  // Optionally: Fetch installed models from Ollama to update size info
   try {
     const response = await fetch(`${API_BASE_URL}/models`, {
       signal: AbortSignal.timeout(10000)
@@ -124,24 +129,20 @@ onMounted(async () => {
     if (response.ok) {
       const data = await response.json();
       if (data.models && Array.isArray(data.models)) {
-        // Update available models with actual installed models
-        const installedModels = data.models.map((model: any) => ({
-          name: model.name,
-          size: model.size ? formatBytes(model.size) : 'Unknown',
-          description: getModelDescription(model.name)
-        }));
+        // Create a map of installed models with their actual sizes
+        const installedMap = new Map(
+          data.models.map((m: any) => [m.name, m.size ? formatBytes(m.size) : null])
+        );
 
-        if (installedModels.length > 0) {
-          availableModels.value = installedModels;
-          // Set first available model as default if current selection not available
-          if (!installedModels.find((m: ModelInfo) => m.name === selectedModel.value)) {
-            selectedModel.value = installedModels[0].name;
-          }
-        }
+        // Update available models with actual installed sizes
+        availableModels.value = prefsAvailableModels.map(model => {
+          const installedSize = installedMap.get(model.name);
+          return installedSize ? { ...model, size: installedSize } : model;
+        });
       }
     }
   } catch (error) {
-    console.warn('Could not fetch available models, using defaults:', error);
+    console.warn('Could not fetch installed models info, using defaults:', error);
   }
 });
 
@@ -155,18 +156,21 @@ const formatBytes = (bytes: number): string => {
 };
 
 const getModelDescription = (modelName: string): string => {
-  const descriptions: Record<string, string> = {
-    'llama3.2:1b': 'Lightweight, fast responses',
-    'llama3.2:3b': 'Better quality, balanced performance', 
-    'llama3:8b': 'High quality, slower responses',
-    'codellama:7b': 'Specialized for code tasks',
-    'default': 'General purpose model'
-  };
-  return descriptions[modelName] || descriptions.default;
+  const modelInfo = getModelInfo(modelName);
+  return modelInfo?.description || 'General purpose model';
 };
 
-const onModelChange = () => {
+const onModelChange = async () => {
   console.log('Model changed to:', selectedModel.value);
+  // Save the new preference to backend
+  if (isAuthenticated.value) {
+    const success = await setPreferredModel(selectedModel.value);
+    if (success) {
+      console.log('Model preference saved successfully');
+    } else {
+      console.error('Failed to save model preference');
+    }
+  }
 };
 
 // Handle transcription data from Sidebar
