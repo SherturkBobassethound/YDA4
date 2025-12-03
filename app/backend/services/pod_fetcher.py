@@ -23,11 +23,6 @@ import json
 import urllib.parse
 from pathlib import Path
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions
 
 
 class PodFetcher:
@@ -37,83 +32,12 @@ class PodFetcher:
 
     def __init__(self):
         """
-        Initialize with target output directory and set up headless browser options.
-        Automatically detects available browser (Chrome or Chromium) and configures accordingly.
+        Initialize with target output directory.
         """
         self.output_dir = os.path.join(os.path.dirname(__file__), "..", "downloads")
         # Ensure the output directory exists
         os.makedirs(self.output_dir, exist_ok=True)
 
-        # Set up headless browser options for Selenium automation
-        self.chrome_options = Options()
-        self.chrome_options.add_argument("--headless") # No GUI
-        self.chrome_options.add_argument("--no-sandbox") # Run without sandbox. Some environments like Docker require this
-        self.chrome_options.add_argument("--disable-dev-shm-usage") # Avoid storing temporary files in /dev/shm (shared memory) which can cause crashes in some environments (Docker)
-        
-        # Detect and configure browser binary location
-        self.browser_binary = self._detect_browser_binary()
-        if self.browser_binary:
-            self.chrome_options.binary_location = self.browser_binary
-
-    def _detect_browser_binary(self) -> str:
-        """
-        Detect available browser binary and return its path.
-        Returns None if no browser is found.
-        """
-        import subprocess
-        
-        # Check for Google Chrome first
-        chrome_paths = [
-            "/usr/bin/google-chrome-stable",
-            "/usr/bin/google-chrome",
-            "/usr/bin/chrome"
-        ]
-        
-        # Check for Chromium
-        chromium_paths = [
-            "/usr/bin/chromium",
-            "/usr/bin/chromium-browser"
-        ]
-        
-        # Test all paths
-        for path in chrome_paths + chromium_paths:
-            try:
-                result = subprocess.run([path, "--version"], 
-                                      capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    print(f"[PodFetcher] Found browser: {path}")
-                    return path
-            except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
-                continue
-        
-        print("[PodFetcher] Warning: No browser binary found. Selenium may fail.")
-        return None
-
-    def _get_chromedriver_path(self) -> str:
-        """
-        Detect available ChromeDriver and return its path.
-        """
-        import subprocess
-        
-        # Check common ChromeDriver locations
-        driver_paths = [
-            "/usr/local/bin/chromedriver",  # Chrome ChromeDriver
-            "/usr/bin/chromedriver",        # Chromium ChromeDriver
-            "chromedriver"                  # System PATH
-        ]
-        
-        for path in driver_paths:
-            try:
-                result = subprocess.run([path, "--version"], 
-                                      capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    print(f"[PodFetcher] Found ChromeDriver: {path}")
-                    return path
-            except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
-                continue
-        
-        print("[PodFetcher] Warning: No ChromeDriver found. Using default.")
-        return None
 
     def fetch(self, podcast_url: str) -> dict:
         """
@@ -372,67 +296,12 @@ class PodFetcher:
         Returns:
             str: RSS feed URL or None on failure
         """
-        # Try Selenium first
-        rss_url = self._get_rss_feed_url_selenium(podcast_url)
-        if rss_url:
-            return rss_url
-        
-        # Fallback to direct API call if Selenium fails
-        print("[PodFetcher] Selenium failed, trying fallback method...")
+        # Use direct API method (Selenium removed)
         return self._get_rss_feed_url_fallback(podcast_url)
-
-    def _get_rss_feed_url_selenium(self, podcast_url: str) -> str:
-        """
-        Use Selenium to get RSS feed URL from rssfeedasap.com
-        """
-        from selenium.webdriver.chrome.service import Service
-        
-        # Get ChromeDriver path
-        driver_path = self._get_chromedriver_path()
-        driver = None # Initialize driver to None for finally block
-        
-        try:
-            if driver_path:
-                service = Service(executable_path=driver_path)
-                driver = webdriver.Chrome(service=service, options=self.chrome_options)
-            else:
-                # Fallback to default ChromeDriver in PATH
-                driver = webdriver.Chrome(options=self.chrome_options)
-            
-            wait = WebDriverWait(driver, timeout=10)  # timeout in seconds
-
-            # Navigate to the RSS feed conversion site
-            driver.get("https://rssfeedasap.com")
-
-            # Wait for the input box to be present
-            input_box = wait.until(expected_conditions.presence_of_element_located((By.NAME, "url")))
-            input_box.clear()
-            input_box.send_keys(podcast_url)
-
-            # Wait for and click the "Get Feed" button
-            button = wait.until(expected_conditions.element_to_be_clickable((By.XPATH, "//button[text()='Get Feed']")))
-            button.click()
-
-            # Wait for the resulting disabled input to appear
-            feed_input = wait.until(expected_conditions.presence_of_element_located(
-                (By.XPATH, "//input[@name='url' and @disabled]")
-            ))
-
-            return feed_input.get_attribute("value")
-
-        except Exception as e:
-            print(f"[PodFetcher] Selenium error: {e}")
-            return None
-        finally:
-            if driver:
-                try:
-                    driver.quit()
-                except:
-                    pass
 
     def _get_rss_feed_url_fallback(self, podcast_url: str) -> str:
         """
-        Fallback method to get RSS feed URL using direct API calls
+        Get RSS feed URL using direct API calls (extracts podcast ID from Apple Podcasts URL)
         """
         try:
             # Try to extract podcast ID from Apple Podcasts URL
