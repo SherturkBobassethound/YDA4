@@ -53,6 +53,12 @@ origins = [
     "http://frontend:80"
 ]
 
+# Add frontend Fly.io domain if configured
+frontend_url = os.getenv('FRONTEND_URL')
+if frontend_url:
+    origins.append(frontend_url)
+    origins.append(frontend_url.replace('https://', 'http://'))  # Also allow HTTP version
+
 # Only allow all origins in development
 if os.getenv('ENVIRONMENT') == 'development':
     origins = ["*"]
