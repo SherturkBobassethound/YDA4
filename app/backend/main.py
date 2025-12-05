@@ -19,6 +19,7 @@ from services.supabase_client import supabase, get_user_supabase_client
 from db.supabase_vector_db import SupabaseVectorDB
 from services.user_preferences import UserPreferencesService
 from auth import get_current_user
+from config.model_config import get_max_input_chars, get_model_context_window
 
 # Initialize components
 embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
@@ -293,14 +294,17 @@ def transcribe_audio(audio_path: str) -> str:
         raise HTTPException(status_code=400, detail=f"Failed to transcribe audio: {str(e)}")
 
 def generate_summary_ollama(text: str, model_name: str = "llama3.2:1b") -> str:
-    """Generate summary using Ollama directly"""
+    """Generate summary using Ollama with model-specific context windows"""
     logger.info(f"Starting summary generation with Ollama model: {model_name}")
     try:
-        # Truncate very long texts to avoid memory issues
-        max_length = 8000  # Adjust based on your needs
-        if len(text) > max_length:
-            text = text[:max_length] + "... [truncated for processing]"
-            logger.info(f"Text truncated to {max_length} characters for processing")
+        # Get model-specific max input size
+        max_chars = get_max_input_chars(model_name)
+        original_length = len(text)
+
+        # Truncate if transcript exceeds model's context window
+        if len(text) > max_chars:
+            text = text[:max_chars]
+            logger.warning(f"Transcript truncated from {original_length} to {max_chars} chars for {model_name} (context window limit)")
         
         prompt = f"Please provide a concise summary of the following text, highlighting the key learnings and main points:\n\n{text}"
         
