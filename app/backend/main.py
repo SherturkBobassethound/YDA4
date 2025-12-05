@@ -305,15 +305,54 @@ def generate_summary_ollama(text: str, model_name: str = "llama3.2:1b") -> str:
         if len(text) > max_chars:
             text = text[:max_chars]
             logger.warning(f"Transcript truncated from {original_length} to {max_chars} chars for {model_name} (context window limit)")
-        
-        prompt = f"Please provide a concise summary of the following text, highlighting the key learnings and main points:\n\n{text}"
-        
+
+        # Enhanced summarization prompt with structured format
+        prompt = f"""Analyze and summarize the following podcast/video transcript.
+
+TRANSCRIPT:
+{text}
+
+---
+
+Provide a comprehensive summary with the following structure:
+
+## OVERVIEW
+In 2-3 sentences, describe:
+- What is the main topic of this content?
+- What is the key thesis or central argument?
+
+## KEY POINTS
+List 4-6 main ideas discussed (use bullet points):
+- Focus on the most important concepts and arguments
+- Include relevant facts, statistics, or examples when notable
+- Present in logical order
+
+## NOTABLE INSIGHTS
+Highlight interesting takeaways:
+- Memorable quotes or powerful statements
+- Unique perspectives or counterintuitive points
+- Actionable recommendations or advice (if any)
+
+Keep the summary detailed enough to understand the content without watching/listening, but concise enough to read in 2-3 minutes."""
+
+        # Enhanced system message for summarization
+        system_message = """You are an expert at analyzing and summarizing long-form content such as podcasts, videos, and lectures.
+
+Your summaries are:
+- Comprehensive yet concise
+- Well-structured with clear sections
+- Focused on key insights and actionable takeaways
+- Accurate to the source material without adding interpretation or external knowledge
+- Written in clear, accessible language
+
+Follow the requested format exactly and ensure all important information is captured."""
+
         response = requests.post(
             f"{OLLAMA_BASE_URL}/api/generate",
             json={
                 "model": model_name,
                 "prompt": prompt,
-                "system": "You are a helpful assistant that provides clear, concise summaries.",
+                "system": system_message,
                 "stream": False
             },
             timeout=300  # 5 minute timeout for summary generation
@@ -333,29 +372,41 @@ def generate_summary_ollama(text: str, model_name: str = "llama3.2:1b") -> str:
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
 def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = None, model_name: str = "llama3.2:1b") -> str:
-    """Chat with Ollama model directly, with enhanced context from vector DB"""
-    logger.info(f"Starting chat with Ollama model: {model_name}")
+    """Chat with RAG - answers questions using retrieved context from user's sources"""
+    logger.info(f"Starting RAG chat with Ollama model: {model_name}")
 
-    # Always search vector DB for relevant chunks, regardless of context
+    # RAG: Retrieve relevant chunks from vector DB
     enhanced_context = None
+    source_map = {}  # Track source titles for citations
+
     try:
         logger.info(f"Searching vector DB for question: {message}")
         # Search vector DB for relevant chunks from ALL user's sources
         search_results = vector_db.search(message, k=5)
 
         if search_results:
-            # Format the search results into a context string
-            vector_context_parts = []
+            # Format with numbered citations and track source titles
+            context_parts = []
             for i, doc in enumerate(search_results, 1):
-                # Include source information if available
-                source_info = doc.get('metadata', {}).get('source', 'Unknown source')
-                vector_context_parts.append(
-                    f"Relevant excerpt {i} (from {source_info}):\n{doc['page_content']}"
+                # Get source metadata
+                metadata = doc.get('metadata', {})
+                source_id = metadata.get('source_id', 'unknown')
+
+                # Try to get a proper source title
+                # The metadata should have source info from when it was stored
+                source_title = metadata.get('source', 'Unknown Source')
+
+                # Store source mapping for reference
+                source_map[i] = source_title
+
+                # Format: [1] Source: Title\nContent
+                context_parts.append(
+                    f"[{i}] Source: {source_title}\n{doc['page_content']}"
                 )
 
-            vector_context = "\n\n".join(vector_context_parts)
-            enhanced_context = f"Based on these relevant excerpts from your sources:\n\n{vector_context}\n\n"
-            logger.info(f"Enhanced context with {len(search_results)} relevant chunks from vector DB")
+            vector_context = "\n\n".join(context_parts)
+            enhanced_context = vector_context
+            logger.info(f"Retrieved {len(search_results)} relevant chunks from vector DB")
         else:
             logger.info("No relevant chunks found in vector DB")
             # If no vector search results and context provided, use that as fallback
@@ -368,24 +419,56 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
         if context:
             enhanced_context = context
             logger.warning("Falling back to provided context")
-    
+
     try:
         if enhanced_context:
-            # Limit context size to avoid token limits
-            max_context = 4000  # Increased for better context
-            if len(enhanced_context) > max_context:
-                enhanced_context = enhanced_context[:max_context] + "... [truncated]"
-            prompt = f"{enhanced_context}\n\nUser question: {message}\n\nPlease provide a helpful response based on the content above."
+            # Use model-specific context window for better utilization
+            max_context_chars = get_max_input_chars(model_name) // 2  # Reserve half for context, half for response
+            if len(enhanced_context) > max_context_chars:
+                enhanced_context = enhanced_context[:max_context_chars] + "\n\n... [Context truncated due to length]"
+
+            # Enhanced RAG prompt with citation instructions
+            prompt = f"""RELEVANT CONTENT FROM USER'S SOURCES:
+
+{enhanced_context}
+
+---
+
+USER QUESTION: {message}
+
+INSTRUCTIONS:
+- Answer the question using ONLY the information provided in the content above
+- Cite your sources using [1], [2], etc. when referencing specific information
+- If the content doesn't fully answer the question, explain what you CAN answer based on available sources and what information is missing
+- When multiple sources discuss the same topic, compare and synthesize the information
+- Be conversational but accurate"""
+
+            # Enhanced system message for RAG chat
+            system_message = """You are a helpful AI assistant that answers questions about the user's podcast and video library.
+
+CRITICAL RULES:
+1. ONLY use information from the provided content excerpts - do not use external knowledge
+2. ALWAYS cite sources using [1], [2], etc. when making claims or referencing information
+3. If you're unsure or the content doesn't contain enough information, say so clearly
+4. Never make up information or fill in gaps with assumptions
+5. When multiple sources discuss the same topic, acknowledge different perspectives
+
+Your goal is to help users understand and recall information from their saved content."""
         else:
             # No sources available
-            prompt = f"User question: {message}\n\nNote: I don't have any sources available to answer this question. Please let the user know they should add sources (YouTube videos, podcasts, or audio files) before asking questions."
-            
+            prompt = f"""USER QUESTION: {message}
+
+I don't have any relevant sources in your library to answer this question. Please upload podcasts, videos, or audio files that contain information about this topic."""
+
+            system_message = """You are a helpful assistant that only answers based on the user's uploaded content.
+When no relevant content is available, politely explain that the user needs to upload sources covering this topic."""
+
         response = requests.post(
             f"{OLLAMA_BASE_URL}/api/generate",
             json={
                 "model": model_name,
                 "prompt": prompt,
-                "system": "You are a helpful assistant that answers questions accurately and concisely based on the provided context.",
+                "system": system_message,
                 "stream": False
             },
             timeout=120  # 2 minute timeout for chat
