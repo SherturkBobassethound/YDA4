@@ -76,6 +76,7 @@
 import { ref, nextTick, onMounted } from 'vue';
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
+import { usePreferences, type ModelOption } from '../composables/usePreferences'
 
 interface Message {
   sender: 'user' | 'machine';
@@ -83,14 +84,15 @@ interface Message {
   model?: string;
 }
 
-interface ModelInfo {
-  name: string;
-  size: string;
-  description: string;
-}
-
 const { fetchWithAuth, API_BASE_URL } = useApi()
 const { isAuthenticated } = useAuth()
+const {
+  preferredModel,
+  availableModels: prefsAvailableModels,
+  loadPreferences,
+  setPreferredModel,
+  getModelInfo
+} = usePreferences()
 
 // State
 const messages = ref<Message[]>([]);
@@ -107,66 +109,34 @@ const summary = ref('');
 const showFullTranscription = ref(false);
 
 // Model selection state
-const selectedModel = ref('llama3.2:1b'); // Default lightweight model
-const availableModels = ref<ModelInfo[]>([
-  { name: 'llama3.2:1b', size: '~1.3GB', description: 'Lightweight, fast responses' },
-  { name: 'llama3.2:3b', size: '~3GB', description: 'Better quality, balanced performance' },
-  { name: 'llama3:8b', size: '~4.7GB', description: 'High quality, slower responses' }
-]);
+const selectedModel = ref('gemma3:1b');
+const availableModels = ref<ModelOption[]>(prefsAvailableModels);
 
-// Fetch available models on component mount
+// Load user preferences on component mount
 onMounted(async () => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/models`, {
-      signal: AbortSignal.timeout(10000)
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.models && Array.isArray(data.models)) {
-        // Update available models with actual installed models
-        const installedModels = data.models.map((model: any) => ({
-          name: model.name,
-          size: model.size ? formatBytes(model.size) : 'Unknown',
-          description: getModelDescription(model.name)
-        }));
-
-        if (installedModels.length > 0) {
-          availableModels.value = installedModels;
-          // Set first available model as default if current selection not available
-          if (!installedModels.find((m: ModelInfo) => m.name === selectedModel.value)) {
-            selectedModel.value = installedModels[0].name;
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('Could not fetch available models, using defaults:', error);
+  if (isAuthenticated.value) {
+    await loadPreferences();
+    selectedModel.value = preferredModel.value;
   }
 });
 
 // Helper functions
-const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-};
-
 const getModelDescription = (modelName: string): string => {
-  const descriptions: Record<string, string> = {
-    'llama3.2:1b': 'Lightweight, fast responses',
-    'llama3.2:3b': 'Better quality, balanced performance', 
-    'llama3:8b': 'High quality, slower responses',
-    'codellama:7b': 'Specialized for code tasks',
-    'default': 'General purpose model'
-  };
-  return descriptions[modelName] || descriptions.default;
+  const modelInfo = getModelInfo(modelName);
+  return modelInfo?.description || 'General purpose model';
 };
 
-const onModelChange = () => {
+const onModelChange = async () => {
   console.log('Model changed to:', selectedModel.value);
+  // Save the new preference to backend
+  if (isAuthenticated.value) {
+    const success = await setPreferredModel(selectedModel.value);
+    if (success) {
+      console.log('Model preference saved successfully');
+    } else {
+      console.error('Failed to save model preference');
+    }
+  }
 };
 
 // Handle transcription data from Sidebar

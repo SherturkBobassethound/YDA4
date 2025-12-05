@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 
@@ -92,17 +92,6 @@ onMounted(async () => {
   // Load user's sources if authenticated
   if (isAuthenticated.value) {
     await loadSources();
-  }
-});
-
-// Watch for authentication changes and load sources when user logs in
-watch(isAuthenticated, async (newValue, oldValue) => {
-  if (newValue && !oldValue) {
-    // User just logged in
-    await loadSources();
-  } else if (!newValue && oldValue) {
-    // User just logged out
-    sources.value = [];
   }
 });
 
@@ -641,5 +630,72 @@ const emit = defineEmits<{
 
 .status-dot.offline {
   background-color: #dc3545;
+}
+
+/* Model Settings Styles */
+.model-settings {
+  margin-top: 25px;
+  padding: 15px;
+  background-color: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+}
+
+.model-settings h4 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #333;
+  font-size: 0.95rem;
+}
+
+.model-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-selection label {
+  font-size: 0.85rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.model-selection select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  background-color: #ffffff;
+  font-size: 0.85rem;
+  color: #333;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.model-selection select:hover:not(:disabled) {
+  border-color: #007bff;
+}
+
+.model-selection select:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.model-selection select optgroup {
+  font-weight: bold;
+  color: #333;
+}
+
+.model-selection select option {
+  font-weight: normal;
+  padding: 4px;
+}
+
+.model-description {
+  font-size: 0.75rem;
+  color: #666;
+  margin: 0;
+  font-style: italic;
 }
 </style>

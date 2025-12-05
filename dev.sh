@@ -164,7 +164,9 @@ fi
 # Start Frontend
 echo -e "${GREEN}Starting Frontend (port 5173)...${NC}"
 cd app/frontend || exit 1
-VITE_API_BASE_URL=http://localhost:8000 npm run dev >> ../../logs/frontend.log 2>&1 &
+# Load environment variables from root .env file and pass to Vite
+source ../../.env 2>/dev/null || true
+VITE_API_BASE_URL=http://localhost:8000 VITE_SUPABASE_URL=$VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY npm run dev >> ../../logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 echo -e "${GREEN}Frontend PID: $FRONTEND_PID${NC}"
 cd ../.. || exit 1
