@@ -6,13 +6,14 @@ export interface ModelOption {
   name: string
   size: string
   description: string
-  family: 'gemma3' | 'qwen3' | 'llama'
+  family: 'gemma3' | 'qwen3' | 'llama' | 'mistral'
 }
 
 // Fixed list of available models (must match backend)
 export const AVAILABLE_MODELS: ModelOption[] = [
   { name: 'gemma3:1b', size: '~815MB', description: 'Small, fast model - best for quick responses', family: 'gemma3' },
-  { name: 'qwen3:1.7b', size: '~1.3GB', description: 'Slightly larger - better quality responses', family: 'qwen3' },
+  { name: 'qwen3:1.7b', size: '~1.4GB', description: 'Slightly larger, slower model - better quality responses', family: 'qwen3' },
+  { name: 'ministral-3:3b', size: '~3GB', description: 'Mistral\'s compact model - balanced performance', family: 'mistral' },
 ]
 
 interface UserPreferences {
