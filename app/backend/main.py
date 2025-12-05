@@ -371,8 +371,15 @@ Follow the requested format exactly and ensure all important information is capt
         logger.error(f"Error generating summary with Ollama: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
-def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = None, model_name: str = "llama3.2:1b") -> str:
-    """Chat with RAG - answers questions using retrieved context from user's sources"""
+def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = None, model_name: str = "llama3.2:1b") -> dict:
+    """Chat with RAG - answers questions using retrieved context from user's sources
+
+    Returns:
+        dict: {
+            'response': str,  # LLM's answer
+            'sources': dict   # Mapping of citation numbers to source titles
+        }
+    """
     logger.info(f"Starting RAG chat with Ollama model: {model_name}")
 
     # RAG: Retrieve relevant chunks from vector DB
@@ -385,6 +392,24 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
         search_results = vector_db.search(message, k=5)
 
         if search_results:
+            # First, collect unique source_ids and fetch their titles from the database
+            source_ids = set()
+            for doc in search_results:
+                metadata = doc.get('metadata', {})
+                source_id = metadata.get('source_id')
+                if source_id:
+                    source_ids.add(source_id)
+
+            # Fetch source titles from database
+            source_titles_map = {}  # source_id -> title
+            if source_ids:
+                try:
+                    sources_result = vector_db.supabase.table('sources').select('id, title').in_('id', list(source_ids)).execute()
+                    for source in sources_result.data:
+                        source_titles_map[source['id']] = source['title']
+                except Exception as e:
+                    logger.warning(f"Could not fetch source titles: {str(e)}")
+
             # Format with numbered citations and track source titles
             context_parts = []
             for i, doc in enumerate(search_results, 1):
@@ -392,12 +417,11 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
                 metadata = doc.get('metadata', {})
                 source_id = metadata.get('source_id', 'unknown')
 
-                # Try to get a proper source title
-                # The metadata should have source info from when it was stored
-                source_title = metadata.get('source', 'Unknown Source')
+                # Get the actual source title from our lookup
+                source_title = source_titles_map.get(source_id, f"Unknown Source ({metadata.get('source', 'unknown')})")
 
                 # Store source mapping for reference
-                source_map[i] = source_title
+                source_map[str(i)] = source_title
 
                 # Format: [1] Source: Title\nContent
                 context_parts.append(
@@ -476,7 +500,12 @@ When no relevant content is available, politely explain that the user needs to u
         response.raise_for_status()
         result = response.json()
         logger.info("Chat response generated successfully")
-        return result.get("response", "No response received")
+
+        # Return both the response and source citations
+        return {
+            "response": result.get("response", "No response received"),
+            "sources": source_map
+        }
     except requests.exceptions.Timeout:
         logger.error("Timeout while generating chat response")
         raise HTTPException(status_code=408, detail="Response generation timed out. Please try a simpler question.")
@@ -799,8 +828,8 @@ async def chat(request: ChatRequest, user: dict = Depends(get_current_user)):
                 logger.warning(f"Could not load user preferences, using default: {str(e)}")
                 model_to_use = 'gemma3:1b'
 
-        response = chat_with_ollama(request.message, vector_db, request.context, model_to_use)
-        return {"response": response}
+        chat_result = chat_with_ollama(request.message, vector_db, request.context, model_to_use)
+        return chat_result  # Returns {"response": str, "sources": dict}
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

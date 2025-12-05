@@ -47,6 +47,17 @@
         >
           <p>{{ msg.text }}</p>
           <span v-if="msg.sender === 'machine'" class="model-tag">{{ msg.model }}</span>
+
+          <!-- Display source citations if available -->
+          <div v-if="msg.sources && Object.keys(msg.sources).length > 0" class="sources">
+            <div class="sources-header">Sources:</div>
+            <div class="source-list">
+              <div v-for="(title, num) in msg.sources" :key="num" class="source-item">
+                <span class="source-number">[{{ num }}]</span>
+                <span class="source-title">{{ title }}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -82,6 +93,7 @@ interface Message {
   sender: 'user' | 'machine';
   text: string;
   model?: string;
+  sources?: Record<string, string>; // Mapping of citation numbers to source titles
 }
 
 const { fetchWithAuth, API_BASE_URL } = useApi()
@@ -193,7 +205,8 @@ const sendMessage = async () => {
     messages.value.push({
       sender: 'machine',
       text: data.response,
-      model: selectedModel.value
+      model: selectedModel.value,
+      sources: data.sources || {}
     });
 
   } catch (error: any) {
@@ -304,6 +317,47 @@ defineExpose({
   margin-top: 4px;
   display: block;
   font-style: italic;
+}
+
+/* Source Citations */
+.sources {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.sources-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.source-item {
+  font-size: 0.8rem;
+  color: #666;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.source-number {
+  font-weight: 600;
+  color: #4A90E2;
+  flex-shrink: 0;
+}
+
+.source-title {
+  color: #555;
+  line-height: 1.4;
 }
 
 /* Initial State Styles */
