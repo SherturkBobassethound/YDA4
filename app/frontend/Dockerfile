@@ -13,11 +13,13 @@ RUN npm ci
 COPY . .
 
 # Build arguments for API URLs and Supabase
+# These can be passed as ARG (via --build-arg) or will use ENV if ARG is not provided
 ARG VITE_API_BASE_URL
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_ANON_KEY
 
-# Set environment variables for build
+# Set environment variables for build (Vite reads from these)
+# Use ARG value if provided, otherwise use ENV (for Fly.io build secrets)
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
 ENV VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}

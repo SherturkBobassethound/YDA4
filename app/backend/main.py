@@ -50,14 +50,14 @@ origins = [
     "http://localhost:3000",
     "http://localhost:5173",  # Vite dev server
     "http://frontend",  # Docker service name
-    "http://frontend:80"
+    "http://frontend:80",
+    "https://yoda-frontend.fly.dev",  # Fly.io frontend
 ]
 
-# Add frontend Fly.io domain if configured
+# Add FRONTEND_URL from environment if set (for production)
 frontend_url = os.getenv('FRONTEND_URL')
 if frontend_url:
     origins.append(frontend_url)
-    origins.append(frontend_url.replace('https://', 'http://'))  # Also allow HTTP version
 
 # Only allow all origins in development
 if os.getenv('ENVIRONMENT') == 'development':

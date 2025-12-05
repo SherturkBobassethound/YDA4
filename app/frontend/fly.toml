@@ -7,10 +7,11 @@ primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
-  # Build args must be passed during deployment:
-  # fly deploy --build-arg VITE_API_BASE_URL="https://yoda-backend.fly.dev" \
-  #            --build-arg VITE_SUPABASE_URL="your-supabase-url" \
-  #            --build-arg VITE_SUPABASE_ANON_KEY="your-anon-key"
+  # Build args will be set via secrets or environment variables
+  # These are needed at build time for Vite
+  # Set via: fly secrets set VITE_API_BASE_URL="https://yoda-backend.fly.dev" --app yoda-frontend
+  # Set via: fly secrets set VITE_SUPABASE_URL="..." --app yoda-frontend
+  # Set via: fly secrets set VITE_SUPABASE_ANON_KEY="..." --app yoda-frontend
 
 [env]
   PORT = "80"
@@ -18,9 +19,9 @@ primary_region = "iad"
 [http_service]
   internal_port = 80
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   processes = ["app"]
 
   [[http_service.checks]]

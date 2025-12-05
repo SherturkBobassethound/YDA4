@@ -12,6 +12,8 @@ primary_region = 'sjc'
 [env]
   ENVIRONMENT = 'production'
   PORT = '8000'
+  # OLLAMA_BASE_URL will be set via secrets to use Fly.io private networking
+  # Set via: fly secrets set OLLAMA_BASE_URL="http://yoda-ollama.internal:11434" --app yoda-backend
   # Set FRONTEND_URL secret to allow CORS from frontend:
   # fly secrets set FRONTEND_URL="https://yoda-frontend.fly.dev" --app yoda-backend
 
