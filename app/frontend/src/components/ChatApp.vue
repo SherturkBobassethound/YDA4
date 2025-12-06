@@ -48,13 +48,26 @@
           <div class="message-content" v-html="renderMarkdown(msg.text)"></div>
           <span v-if="msg.sender === 'machine'" class="model-tag">{{ msg.model }}</span>
 
-          <!-- Display source citations if available -->
+          <!-- Display source citations if available (two-level collapsible) -->
           <div v-if="msg.sources && Object.keys(msg.sources).length > 0" class="sources">
-            <div class="sources-header">Sources:</div>
-            <div class="source-list">
-              <div v-for="(title, num) in msg.sources" :key="num" class="source-item">
-                <span class="source-number">[{{ num }}]</span>
-                <span class="source-title">{{ title }}</span>
+            <div class="sources-toggle" @click="toggleSources(msg)">
+              <span class="toggle-icon">{{ msg.sourcesExpanded ? '▼' : '►' }}</span>
+              <span class="sources-header">Sources ({{ Object.keys(msg.sources).length }})</span>
+            </div>
+
+            <!-- Expandable sources list -->
+            <div v-if="msg.sourcesExpanded" class="source-list">
+              <div v-for="(sourceInfo, num) in msg.sources" :key="num" class="source-item">
+                <div class="source-header" @click="toggleChunk(msg, num)">
+                  <span class="chunk-toggle-icon">{{ isChunkExpanded(msg, num) ? '▼' : '►' }}</span>
+                  <span class="source-number">[{{ num }}]</span>
+                  <span class="source-title">{{ sourceInfo.title }}</span>
+                </div>
+
+                <!-- Expandable chunk content -->
+                <div v-if="isChunkExpanded(msg, num)" class="chunk-content">
+                  {{ sourceInfo.content }}
+                </div>
               </div>
             </div>
           </div>
@@ -90,11 +103,18 @@ import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { usePreferences, type ModelOption } from '../composables/usePreferences'
 
+interface SourceInfo {
+  title: string;
+  content: string;
+}
+
 interface Message {
   sender: 'user' | 'machine';
   text: string;
   model?: string;
-  sources?: Record<string, string>; // Mapping of citation numbers to source titles
+  sources?: Record<string, SourceInfo>; // Mapping of citation numbers to {title, content}
+  sourcesExpanded?: boolean; // Track if sources section is expanded
+  expandedChunks?: Set<string>; // Track which individual chunks are expanded
 }
 
 const { fetchWithAuth, API_BASE_URL } = useApi()
@@ -222,7 +242,9 @@ const sendMessage = async () => {
       sender: 'machine',
       text: data.response,
       model: selectedModel.value,
-      sources: data.sources || {}
+      sources: data.sources || {},
+      sourcesExpanded: false,
+      expandedChunks: new Set()
     });
 
   } catch (error: any) {
@@ -258,6 +280,31 @@ const scrollToBottom = async () => {
   await nextTick();
   const el = messagesContainer.value;
   if (el) el.scrollTop = el.scrollHeight;
+};
+
+// Toggle sources section expansion
+const toggleSources = (message: Message) => {
+  message.sourcesExpanded = !message.sourcesExpanded;
+};
+
+// Toggle individual chunk expansion
+const toggleChunk = (message: Message, chunkNum: string) => {
+  if (!message.expandedChunks) {
+    message.expandedChunks = new Set();
+  }
+
+  if (message.expandedChunks.has(chunkNum)) {
+    message.expandedChunks.delete(chunkNum);
+  } else {
+    message.expandedChunks.add(chunkNum);
+  }
+  // Force reactivity update
+  message.expandedChunks = new Set(message.expandedChunks);
+};
+
+// Check if a chunk is expanded
+const isChunkExpanded = (message: Message, chunkNum: string): boolean => {
+  return message.expandedChunks?.has(chunkNum) || false;
 };
 
 // Expose the handler for parent component
@@ -335,18 +382,39 @@ defineExpose({
   font-style: italic;
 }
 
-/* Source Citations */
+/* Source Citations - Two-level collapsible */
 .sources {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid rgba(0, 0, 0, 0.1);
 }
 
+.sources-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  user-select: none;
+}
+
+.sources-toggle:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.toggle-icon {
+  font-size: 0.7rem;
+  color: #666;
+  width: 12px;
+  display: inline-block;
+}
+
 .sources-header {
   font-size: 0.75rem;
   font-weight: 600;
   color: #555;
-  margin-bottom: 6px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -354,26 +422,65 @@ defineExpose({
 .source-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  margin-top: 8px;
+  margin-left: 18px;
 }
 
 .source-item {
-  font-size: 0.8rem;
-  color: #666;
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+}
+
+.source-header {
+  display: flex;
   align-items: baseline;
+  gap: 6px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  user-select: none;
+}
+
+.source-header:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.chunk-toggle-icon {
+  font-size: 0.65rem;
+  color: #666;
+  width: 10px;
+  display: inline-block;
 }
 
 .source-number {
   font-weight: 600;
   color: #4A90E2;
   flex-shrink: 0;
+  font-size: 0.8rem;
 }
 
 .source-title {
   color: #555;
   line-height: 1.4;
+  font-size: 0.8rem;
+}
+
+.chunk-content {
+  margin-top: 6px;
+  margin-left: 26px;
+  padding: 10px 12px;
+  background-color: rgba(0, 0, 0, 0.03);
+  border-left: 2px solid #4A90E2;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #444;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 /* Initial State Styles */

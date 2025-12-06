@@ -377,7 +377,7 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
     Returns:
         dict: {
             'response': str,  # LLM's answer
-            'sources': dict   # Mapping of citation numbers to source titles
+            'sources': dict   # Mapping of citation numbers to {title, content}
         }
     """
     logger.info(f"Starting RAG chat with Ollama model: {model_name}")
@@ -426,8 +426,11 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
                 # Get the actual source title from our lookup
                 source_title = source_titles_map.get(source_id, f"Unknown Source ({metadata.get('source', 'unknown')})")
 
-                # Store source mapping for reference
-                source_map[str(i)] = source_title
+                # Store source mapping for reference (with title and content for UI)
+                source_map[str(i)] = {
+                    "title": source_title,
+                    "content": doc['page_content']
+                }
 
                 # Format: [1] Source: Title\nContent
                 context_parts.append(
@@ -468,7 +471,9 @@ USER QUESTION: {message}
 
 INSTRUCTIONS:
 - Answer the question using ONLY the information provided in the content above
+- Not all provided sources may be relevant - only cite those that actually help answer the question
 - Cite your sources using [1], [2], etc. when referencing specific information
+- If none of the sources are relevant, clearly state that the question cannot be answered from the available content
 - If the content doesn't fully answer the question, explain what you CAN answer based on available sources and what information is missing
 - When multiple sources discuss the same topic, compare and synthesize the information
 - Be conversational but accurate"""
