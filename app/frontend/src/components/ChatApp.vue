@@ -369,6 +369,7 @@ defineExpose({
   border: 1px solid #ddd;
   border-radius: 6px;
   background-color: white;
+  color: #333;
   font-size: 0.9rem;
   min-width: 180px;
 }
@@ -376,6 +377,11 @@ defineExpose({
 .model-selection select:focus {
   outline: none;
   border-color: #007bff;
+}
+
+.model-selection select option {
+  color: #333;
+  background-color: white;
 }
 
 .model-info {
