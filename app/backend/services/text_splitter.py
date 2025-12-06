@@ -7,6 +7,7 @@ Current functionality:
   - Takes a file path to a text file.
   - Reads the contents of the text file.
   - Splits the text into chunks using LangChain's RecursiveCharacterTextSplitter.
+  - Uses sentence-aware separators by default for more coherent, readable chunks.
   - Returns a list of raw string chunks.
 
 Future enhancements:
@@ -24,12 +25,27 @@ class TextSplitter:
             chunk_size (int): Maximum number of characters per chunk. Default: 1000.
             chunk_overlap (int): Number of overlapping characters between consecutive chunks. Default: 200 (20% overlap).
             separators (list, optional): Custom separators for splitting text.
-                                         If None, the default separators in RecursiveCharacterTextSplitter are used.
+                                         If None, uses sentence-aware separators for more coherent chunks.
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.separators = separators
-        
+
+        # Use sentence-aware separators by default for more coherent chunks
+        if separators is None:
+            self.separators = [
+                "\n\n",    # Paragraphs (highest priority)
+                "\n",      # Lines
+                ". ",      # Sentences ending with period
+                "? ",      # Sentences ending with question mark
+                "! ",      # Sentences ending with exclamation
+                "; ",      # Semicolons
+                ", ",      # Commas
+                " ",       # Words
+                ""         # Characters (last resort)
+            ]
+        else:
+            self.separators = separators
+
         # Initialize the recursive text splitter from LangChain.
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
