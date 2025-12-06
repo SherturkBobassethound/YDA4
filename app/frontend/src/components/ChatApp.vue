@@ -20,8 +20,13 @@
 
       <!-- Transcription Summary (only shown when content is processed) -->
       <div v-if="hasTranscription" class="transcription-summary">
-        <h4>Summary</h4>
-        <p>{{ summary }}</p>
+        <div class="summary-header">
+          <h4>Summary</h4>
+          <button @click="toggleSummary" class="toggle-btn-small">
+            {{ showSummary ? 'Hide' : 'Show' }}
+          </button>
+        </div>
+        <div v-if="showSummary" class="summary-content" v-html="renderMarkdown(summary)"></div>
         <button @click="toggleTranscription" class="toggle-btn">
           {{ showFullTranscription ? 'Hide' : 'Show' }} Full Transcription
         </button>
@@ -139,6 +144,7 @@ const isProcessing = ref(false);
 const hasTranscription = ref(false);
 const transcription = ref('');
 const summary = ref('');
+const showSummary = ref(true); // Summary visible by default
 const showFullTranscription = ref(false);
 
 // Model selection state
@@ -264,6 +270,10 @@ const sendMessage = async () => {
   }
 };
 
+const toggleSummary = () => {
+  showSummary.value = !showSummary.value;
+};
+
 const toggleTranscription = () => {
   showFullTranscription.value = !showFullTranscription.value;
 };
@@ -273,6 +283,7 @@ const reset = () => {
   transcription.value = '';
   summary.value = '';
   messages.value = [];
+  showSummary.value = true;
   showFullTranscription.value = false;
 };
 
@@ -552,8 +563,15 @@ defineExpose({
   border-bottom: 1px solid #e9ecef;
 }
 
+.summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
 .transcription-summary h4 {
-  margin: 0 0 10px 0;
+  margin: 0;
   color: #333;
 }
 
@@ -561,6 +579,50 @@ defineExpose({
   margin: 0 0 15px 0;
   color: #666;
   line-height: 1.6;
+}
+
+/* Summary markdown content styling */
+.summary-content {
+  margin: 0 0 15px 0;
+  color: #666;
+  line-height: 1.6;
+}
+
+.summary-content h2 {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 12px 0 8px 0;
+  color: #333;
+}
+
+.summary-content h3 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 10px 0 6px 0;
+  color: #444;
+}
+
+.summary-content p {
+  margin: 8px 0;
+}
+
+.summary-content ul,
+.summary-content ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.summary-content li {
+  margin: 4px 0;
+}
+
+.summary-content strong {
+  font-weight: 600;
+  color: #333;
+}
+
+.summary-content em {
+  font-style: italic;
 }
 
 .toggle-btn {
@@ -574,6 +636,20 @@ defineExpose({
 }
 
 .toggle-btn:hover {
+  background-color: #5a6268;
+}
+
+.toggle-btn-small {
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.toggle-btn-small:hover {
   background-color: #5a6268;
 }
 
