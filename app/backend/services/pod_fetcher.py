@@ -21,6 +21,7 @@ import requests
 import feedparser
 import json
 import urllib.parse
+import unicodedata
 from pathlib import Path
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -31,9 +32,21 @@ from selenium.webdriver.support import expected_conditions
 
 
 class PodFetcher:
-    
+
     # Base URL for the new transcript scraping service
     _PODSCRIPTS_BASE_URL = "https://podscripts.co"
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """
+        Normalize Unicode text to ensure consistent character representation.
+        This helps match strings even when they use different Unicode encodings
+        for the same character (e.g., em-dash variations).
+        """
+        if not text:
+            return ""
+        # NFC normalization converts characters to their canonical composed form
+        return unicodedata.normalize('NFC', text)
 
     def __init__(self):
         """
@@ -182,6 +195,7 @@ class PodFetcher:
         """
         resp = requests.get(apple_podcast_url)
         resp.raise_for_status()
+        resp.encoding = 'utf-8'  # Explicitly set encoding to UTF-8
         soup = BeautifulSoup(resp.text, "html.parser")
         
         schema_script = soup.find("script", {"id": "schema:episode", "type": "application/ld+json"})
@@ -205,14 +219,20 @@ class PodFetcher:
         url = f"{self._PODSCRIPTS_BASE_URL}/podcasts"
         resp = requests.get(url)
         resp.raise_for_status()
+        resp.encoding = 'utf-8'  # Explicitly set encoding to UTF-8
 
         soup = BeautifulSoup(resp.text, "html.parser")
         pods = soup.find_all("div", class_="single-pod") # This is the key to finding the podcasts available
 
+        # Normalize podcast name for comparison
+        normalized_podcast_name = self._normalize_text(podcast_name).lower()
+
         for pod in pods:
             a = pod.find("a")
-            if a and podcast_name.lower() in a.text.lower():
-                return urllib.parse.urljoin(self._PODSCRIPTS_BASE_URL, a["href"])
+            if a:
+                normalized_pod_text = self._normalize_text(a.text).lower()
+                if normalized_podcast_name in normalized_pod_text:
+                    return urllib.parse.urljoin(self._PODSCRIPTS_BASE_URL, a["href"])
 
         raise ValueError(f"Podcast '{podcast_name}' not found in podscripts.co directory.")
 
@@ -221,12 +241,17 @@ class PodFetcher:
         """From a podscripts.co podcast page, find the episode link."""
         resp = requests.get(podcast_url)
         resp.raise_for_status()
+        resp.encoding = 'utf-8'  # Explicitly set encoding to UTF-8
         soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Normalize the episode title for comparison
+        normalized_episode_title = self._normalize_text(episode_title).lower()
 
         episodes = soup.find_all("a", href=True)
         for ep in episodes:
-            # Simple substring match
-            if episode_title.lower() in ep.text.lower():
+            # Simple substring match with normalized text
+            normalized_ep_text = self._normalize_text(ep.text).lower()
+            if normalized_episode_title in normalized_ep_text:
                 return urllib.parse.urljoin(self._PODSCRIPTS_BASE_URL, ep["href"])
 
         raise ValueError(f"Episode '{episode_title}' not found on podscripts.co.")
@@ -235,6 +260,7 @@ class PodFetcher:
         """Extracts all transcript text from a Podscripts episode page."""
         resp = requests.get(episode_url)
         resp.raise_for_status()
+        resp.encoding = 'utf-8'  # Explicitly set encoding to UTF-8
         soup = BeautifulSoup(resp.text, "html.parser")
 
         # All transcript sections
@@ -338,6 +364,7 @@ class PodFetcher:
         try:
             response = requests.get(podcast_url)
             response.raise_for_status()
+            response.encoding = 'utf-8'  # Explicitly set encoding to UTF-8
             soup = BeautifulSoup(response.text, 'html.parser') # Parse HTML with BeautifulSoup
             
             # Try JSON-LD schema first
@@ -477,12 +504,22 @@ class PodFetcher:
             dict: {'type': 'transcript' or 'audio', 'url': str} or None if not found
         """
 
-        feed = feedparser.parse(rss_url)
+        # Fetch RSS feed with explicit UTF-8 encoding
+        response = requests.get(rss_url)
+        response.raise_for_status()
+        response.encoding = 'utf-8'  # Explicitly set encoding to UTF-8
+
+        # Parse the response content with feedparser
+        feed = feedparser.parse(response.content)
         podcast_name = feed.feed.get('title', 'Unknown Podcast')
+
+        # Normalize the episode title for comparison
+        normalized_episode_title = self._normalize_text(episode_title).lower()
 
         # Iterate through feed entries to find the matching episode based on the title scraped from Apple Podcasts
         for entry in feed.entries:
-            if episode_title.lower() in entry.title.lower():
+            normalized_entry_title = self._normalize_text(entry.title).lower()
+            if normalized_episode_title in normalized_entry_title:
                 # Priority 1: Check for a transcript link
                 if 'podcast_transcript' in entry:
                     return {'podcast_name': podcast_name, 'type': 'transcript', 'url': entry.podcast_transcript['url']}
