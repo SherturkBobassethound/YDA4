@@ -9,8 +9,9 @@ from .supabase_client import get_user_supabase_client
 
 # Available models that users can select (fixed list)
 AVAILABLE_MODELS = [
-    "gemma3:1b",     # Small, fast model (~815MB)
-    "qwen3:1.7b",    # Slightly larger, good balance (~1.3GB)
+    "gemma3:1b",        # Small, fast model (~815MB)
+    "qwen3:1.7b",       # Slightly larger, good balance (~1.3GB)
+    "ministral-3:3b",   # Mistral's compact model (~3GB)
 ]
 
 DEFAULT_MODEL = "gemma3:1b"

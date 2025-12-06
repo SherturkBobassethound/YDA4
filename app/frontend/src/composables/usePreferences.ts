@@ -21,12 +21,13 @@ interface UserPreferences {
   updated_at?: string
 }
 
-const preferredModel = ref<string>('gemma3:1b')
-const isLoading = ref<boolean>(false)
-const error = ref<string | null>(null)
-
 export function usePreferences() {
   const { fetchWithAuth, API_BASE_URL } = useApi()
+
+  // State is per-composable instance, not shared globally
+  const preferredModel = ref<string>('gemma3:1b')
+  const isLoading = ref<boolean>(false)
+  const error = ref<string | null>(null)
 
   /**
    * Get model information by name
@@ -36,9 +37,9 @@ export function usePreferences() {
   }
 
   /**
-   * Get the current preferred model
+   * Get the current preferred model (computed for reactivity)
    */
-  const getCurrentModel = computed(() => preferredModel.value)
+  const currentModel = computed(() => preferredModel.value)
 
   /**
    * Load user preferences from the backend
@@ -119,7 +120,7 @@ export function usePreferences() {
   }
 
   return {
-    preferredModel: getCurrentModel,
+    preferredModel: currentModel,
     isLoading: computed(() => isLoading.value),
     error: computed(() => error.value),
     availableModels: AVAILABLE_MODELS,

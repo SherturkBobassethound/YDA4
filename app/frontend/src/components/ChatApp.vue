@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from 'vue';
+import { ref, nextTick, onMounted, watch } from 'vue';
 import { marked } from 'marked';
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
@@ -148,7 +148,7 @@ const showSummary = ref(true); // Summary visible by default
 const showFullTranscription = ref(false);
 
 // Model selection state
-const selectedModel = ref(preferredModel.value);
+const selectedModel = ref('gemma3:1b');
 const availableModels = ref<ModelOption[]>(prefsAvailableModels);
 
 // Configure marked options
@@ -157,11 +157,18 @@ marked.setOptions({
   gfm: true,          // GitHub Flavored Markdown
 });
 
+// Watch for preferredModel changes and sync to selectedModel
+watch(preferredModel, (newModel) => {
+  if (newModel && newModel !== selectedModel.value) {
+    selectedModel.value = newModel;
+  }
+});
+
 // Load user preferences on component mount
 onMounted(async () => {
   if (isAuthenticated.value) {
     await loadPreferences();
-    selectedModel.value = preferredModel.value;
+    // selectedModel will be updated via the watcher above
   }
 });
 
