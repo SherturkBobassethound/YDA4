@@ -148,7 +148,7 @@ const showSummary = ref(true); // Summary visible by default
 const showFullTranscription = ref(false);
 
 // Model selection state
-const selectedModel = ref('gemma3:1b');
+const selectedModel = ref(preferredModel.value);
 const availableModels = ref<ModelOption[]>(prefsAvailableModels);
 
 // Configure marked options
