@@ -37,11 +37,6 @@ export function usePreferences() {
   }
 
   /**
-   * Get the current preferred model (computed for reactivity)
-   */
-  const currentModel = computed(() => preferredModel.value)
-
-  /**
    * Load user preferences from the backend
    */
   const loadPreferences = async (): Promise<void> => {
@@ -120,13 +115,12 @@ export function usePreferences() {
   }
 
   return {
-    preferredModel: currentModel,
+    preferredModel,
     isLoading: computed(() => isLoading.value),
     error: computed(() => error.value),
     availableModels: AVAILABLE_MODELS,
     getModelInfo,
     loadPreferences,
-    savePreferences,
     setPreferredModel,
   }
 }

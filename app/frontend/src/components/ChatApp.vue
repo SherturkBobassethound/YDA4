@@ -10,12 +10,12 @@
       <!-- Model Selection -->
       <div class="model-selection">
         <label for="model-select">AI Model:</label>
-        <select id="model-select" v-model="selectedModel" @change="onModelChange">
+        <select id="model-select" v-model="preferredModel" @change="onModelChange">
           <option v-for="model in availableModels" :key="model.name" :value="model.name">
             {{ model.name }} ({{ model.size }})
           </option>
         </select>
-        <span class="model-info">{{ getModelDescription(selectedModel) }}</span>
+        <span class="model-info">{{ getModelDescription(preferredModel) }}</span>
       </div>
 
       <!-- Transcription Summary (only shown when content is processed) -->
@@ -102,7 +102,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, watch } from 'vue';
+import { ref, nextTick, watch } from 'vue';
 import { marked } from 'marked';
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
@@ -148,7 +148,6 @@ const showSummary = ref(true); // Summary visible by default
 const showFullTranscription = ref(false);
 
 // Model selection state
-const selectedModel = ref('gemma3:1b');
 const availableModels = ref<ModelOption[]>(prefsAvailableModels);
 
 // Configure marked options
@@ -157,20 +156,12 @@ marked.setOptions({
   gfm: true,          // GitHub Flavored Markdown
 });
 
-// Watch for preferredModel changes and sync to selectedModel
-watch(preferredModel, (newModel) => {
-  if (newModel && newModel !== selectedModel.value) {
-    selectedModel.value = newModel;
-  }
-});
-
-// Load user preferences on component mount
-onMounted(async () => {
-  if (isAuthenticated.value) {
+// Load user preferences when authentication completes
+watch(isAuthenticated, async (authenticated) => {
+  if (authenticated) {
     await loadPreferences();
-    // selectedModel will be updated via the watcher above
   }
-});
+}, { immediate: true });
 
 // Helper functions
 const renderMarkdown = (text: string): string => {
@@ -188,15 +179,9 @@ const getModelDescription = (modelName: string): string => {
 };
 
 const onModelChange = async () => {
-  console.log('Model changed to:', selectedModel.value);
   // Save the new preference to backend
   if (isAuthenticated.value) {
-    const success = await setPreferredModel(selectedModel.value);
-    if (success) {
-      console.log('Model preference saved successfully');
-    } else {
-      console.error('Failed to save model preference');
-    }
+    await setPreferredModel(preferredModel.value);
   }
 };
 
@@ -209,8 +194,8 @@ const handleTranscriptionComplete = (data: { transcription: string; summary: str
   // Add welcome message
   messages.value.push({
     sender: 'machine',
-    text: `Great! I've processed your content using ${selectedModel.value}. You can now ask me questions about it. What would you like to know?`,
-    model: selectedModel.value
+    text: `Great! I've processed your content using ${preferredModel.value}. You can now ask me questions about it. What would you like to know?`,
+    model: preferredModel.value
   });
 };
 
@@ -228,7 +213,7 @@ const sendMessage = async () => {
     // Send request to backend - context is optional now since backend always searches vector DB
     const requestBody: any = {
       message: txt,
-      model: selectedModel.value
+      model: preferredModel.value
     };
 
     // Include context only if available (for fallback purposes)
@@ -254,7 +239,7 @@ const sendMessage = async () => {
     messages.value.push({
       sender: 'machine',
       text: data.response,
-      model: selectedModel.value,
+      model: preferredModel.value,
       sources: data.sources || {},
       sourcesExpanded: false,
       expandedChunks: new Set()
@@ -269,7 +254,7 @@ const sendMessage = async () => {
     messages.value.push({
       sender: 'machine',
       text: errorMessage,
-      model: selectedModel.value
+      model: preferredModel.value
     });
   } finally {
     isProcessing.value = false;
