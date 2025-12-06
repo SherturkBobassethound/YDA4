@@ -28,7 +28,7 @@ embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-Mi
 OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
 
 # Initialize services
-text_splitter = TextSplitter(chunk_size=500, chunk_overlap=50)
+text_splitter = TextSplitter(chunk_size=1000, chunk_overlap=200)
 
 # Helper function to get user-specific vector DB
 def get_user_vector_db(user_id: str, user_token: str) -> SupabaseVectorDB:
@@ -388,8 +388,14 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
 
     try:
         logger.info(f"Searching vector DB for question: {message}")
+        # Calculate dynamic K based on model's context window
+        # Larger models can handle more chunks for better context
+        max_context_chars = get_max_input_chars(model_name) * 0.65  # Reserve 65% for context
+        dynamic_k = min(20, max(5, int(max_context_chars // 1000)))  # Min 5, max 20 chunks
+        logger.info(f"Using dynamic k={dynamic_k} for model {model_name} (max_context: {max_context_chars} chars)")
+
         # Search vector DB for relevant chunks from ALL user's sources
-        search_results = vector_db.search(message, k=5)
+        search_results = vector_db.search(message, k=dynamic_k)
 
         if search_results:
             # First, collect unique source_ids and fetch their titles from the database
@@ -447,7 +453,7 @@ def chat_with_ollama(message: str, vector_db: SupabaseVectorDB, context: str = N
     try:
         if enhanced_context:
             # Use model-specific context window for better utilization
-            max_context_chars = get_max_input_chars(model_name) // 2  # Reserve half for context, half for response
+            max_context_chars = get_max_input_chars(model_name) * 0.65  # Reserve 65% for context, 35% for response
             if len(enhanced_context) > max_context_chars:
                 enhanced_context = enhanced_context[:max_context_chars] + "\n\n... [Context truncated due to length]"
 

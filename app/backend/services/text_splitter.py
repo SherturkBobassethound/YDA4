@@ -16,13 +16,13 @@ Future enhancements:
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 class TextSplitter:
-    def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50, separators: list = None):
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200, separators: list = None):
         """
         Initialize the TextSplitter with configurable chunk parameters.
 
         Args:
-            chunk_size (int): Maximum number of characters per chunk.
-            chunk_overlap (int): Number of overlapping characters between consecutive chunks.
+            chunk_size (int): Maximum number of characters per chunk. Default: 1000.
+            chunk_overlap (int): Number of overlapping characters between consecutive chunks. Default: 200 (20% overlap).
             separators (list, optional): Custom separators for splitting text.
                                          If None, the default separators in RecursiveCharacterTextSplitter are used.
         """
@@ -78,7 +78,7 @@ if __name__ == "__main__":
     sample_file_path = "../../../test_data/transcript_dwarkesh-ama-ft-sholto-trenton.txt"
     
     # Create an instance of TextSplitter.
-    splitter = TextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = TextSplitter(chunk_size=1000, chunk_overlap=200)
     
     # Split the file and retrieve chunks.
     chunks = splitter.split_file(sample_file_path)
