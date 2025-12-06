@@ -36,3 +36,7 @@ primary_region = 'sjc'
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
+  size = 'performance-2x'
+
+# Cost optimization: Backend needs to stay running due to model loading
+# but we can reduce to minimum machines

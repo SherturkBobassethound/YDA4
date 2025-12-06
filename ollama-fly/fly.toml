@@ -15,7 +15,7 @@ primary_region = 'sjc'
 [[mounts]]
   source = 'ollama_data'
   destination = '/root/.ollama'
-  initial_size = '5gb'
+  initial_size = '3gb'
 
 [http_service]
   internal_port = 11434
@@ -24,4 +24,6 @@ primary_region = 'sjc'
   min_machines_running = 0
 
 [[vm]]
-  size = 'performance-1x'
+  memory = '2gb'
+  cpu_kind = 'shared'
+  cpus = 2

@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 import yt_dlp
-import whisper
+# import whisper  # Removed for deployment size constraints
 import requests
 import tempfile
 import os
@@ -71,13 +71,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load Whisper model
-try:
-    model = whisper.load_model("base")
-    logger.info("Whisper model loaded successfully")
-except Exception as e:
-    logger.error(f"Error loading Whisper model: {str(e)}")
-    raise
+# Load Whisper model - DISABLED for deployment size constraints
+# Transcription will only work for content with existing transcripts
+model = None
+logger.info("Whisper model DISABLED - only existing transcripts will work")
 
 class TranscriptionRequest(BaseModel):
     youtube_url: Optional[str] = None
@@ -284,15 +281,9 @@ def download_youtube_audio(url: str) -> dict:
                     raise HTTPException(status_code=400, detail=f"Failed to download YouTube video after all attempts. Primary error: {str(e)}. Fallback error: {str(fallback_error)}. Video fallback error: {str(video_fallback_error)}. Final fallback error: {str(final_error)}")
 
 def transcribe_audio(audio_path: str) -> str:
-    """Transcribe audio file using Whisper model"""
-    logger.info(f"Starting transcription of audio file: {audio_path}")
-    try:
-        result = model.transcribe(audio_path)
-        logger.info("Transcription completed successfully")
-        return result["text"]
-    except Exception as e:
-        logger.error(f"Error transcribing audio: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Failed to transcribe audio: {str(e)}")
+    """Transcribe audio file using Whisper model - DISABLED"""
+    logger.error("Transcription is disabled in this deployment")
+    raise HTTPException(status_code=501, detail="Audio transcription is not available in this deployment. Only content with existing transcripts (YouTube, podcasts) can be processed.")
 
 def generate_summary_ollama(text: str, model_name: str = "llama3.2:1b") -> str:
     """Generate summary using Ollama directly"""
@@ -794,7 +785,7 @@ async def health_check():
     """Health check endpoint that also verifies service connections"""
     status = {
         "status": "healthy",
-        "whisper": "loaded",
+        "whisper": "disabled",
         "ollama": "disconnected",
         "supabase": "disconnected"
     }

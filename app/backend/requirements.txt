@@ -8,17 +8,18 @@ python-multipart==0.0.6
 # NumPy version constraint to avoid compatibility issues
 numpy<2
 
+# NOTE: Whisper/PyTorch removed for deployment size constraints
 # PyTorch - required by Whisper (CPU version will be auto-selected if no GPU)
-torch
-openai-whisper
+# torch
+# openai-whisper
 
 # LangChain for embeddings and text splitting
 langchain==0.3.21
 langchain-huggingface
 langchain-community
 
-# Embeddings (sentence-transformers is a dependency of langchain-huggingface)
-# No need to specify separately
+# Embeddings
+sentence-transformers
 
 # Web scraping and processing
 beautifulsoup4==4.13.3
