@@ -48,6 +48,37 @@ class PodFetcher:
         # NFC normalization converts characters to their canonical composed form
         return unicodedata.normalize('NFC', text)
 
+    @staticmethod
+    def _normalize_for_matching(text: str) -> str:
+        """
+        Aggressively normalize text for fuzzy matching.
+        Handles variations in punctuation, dashes, and whitespace.
+
+        Examples:
+          "dead-end" -> "dead end"
+          "Father of RL – thinks" -> "father of rl thinks"
+          "AI  Safety" -> "ai safety"
+        """
+        if not text:
+            return ""
+
+        # First apply Unicode normalization
+        text = unicodedata.normalize('NFC', text)
+
+        # Replace all types of dashes and hyphens with spaces
+        # Covers: hyphen (-), en-dash (–), em-dash (—), minus (−), etc.
+        dash_chars = ['-', '–', '—', '−', '‐', '‑', '‒', '―']
+        for dash in dash_chars:
+            text = text.replace(dash, ' ')
+
+        # Replace other punctuation that might vary
+        text = text.replace("'", "").replace('"', "").replace('`', "")
+
+        # Normalize whitespace: collapse multiple spaces to single space
+        text = ' '.join(text.split())
+
+        return text.lower().strip()
+
     def __init__(self):
         """
         Initialize with target output directory and set up headless browser options.
@@ -224,13 +255,13 @@ class PodFetcher:
         soup = BeautifulSoup(resp.text, "html.parser")
         pods = soup.find_all("div", class_="single-pod") # This is the key to finding the podcasts available
 
-        # Normalize podcast name for comparison
-        normalized_podcast_name = self._normalize_text(podcast_name).lower()
+        # Normalize podcast name for comparison (aggressive normalization for matching)
+        normalized_podcast_name = self._normalize_for_matching(podcast_name)
 
         for pod in pods:
             a = pod.find("a")
             if a:
-                normalized_pod_text = self._normalize_text(a.text).lower()
+                normalized_pod_text = self._normalize_for_matching(a.text)
                 if normalized_podcast_name in normalized_pod_text:
                     return urllib.parse.urljoin(self._PODSCRIPTS_BASE_URL, a["href"])
 
@@ -244,13 +275,13 @@ class PodFetcher:
         resp.encoding = 'utf-8'  # Explicitly set encoding to UTF-8
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Normalize the episode title for comparison
-        normalized_episode_title = self._normalize_text(episode_title).lower()
+        # Normalize the episode title for comparison (aggressive normalization for matching)
+        normalized_episode_title = self._normalize_for_matching(episode_title)
 
         episodes = soup.find_all("a", href=True)
         for ep in episodes:
-            # Simple substring match with normalized text
-            normalized_ep_text = self._normalize_text(ep.text).lower()
+            # Simple substring match with aggressive normalization
+            normalized_ep_text = self._normalize_for_matching(ep.text)
             if normalized_episode_title in normalized_ep_text:
                 return urllib.parse.urljoin(self._PODSCRIPTS_BASE_URL, ep["href"])
 
@@ -513,12 +544,12 @@ class PodFetcher:
         feed = feedparser.parse(response.content)
         podcast_name = feed.feed.get('title', 'Unknown Podcast')
 
-        # Normalize the episode title for comparison
-        normalized_episode_title = self._normalize_text(episode_title).lower()
+        # Normalize the episode title for comparison (aggressive normalization for matching)
+        normalized_episode_title = self._normalize_for_matching(episode_title)
 
         # Iterate through feed entries to find the matching episode based on the title scraped from Apple Podcasts
         for entry in feed.entries:
-            normalized_entry_title = self._normalize_text(entry.title).lower()
+            normalized_entry_title = self._normalize_for_matching(entry.title)
             if normalized_episode_title in normalized_entry_title:
                 # Priority 1: Check for a transcript link
                 if 'podcast_transcript' in entry:
