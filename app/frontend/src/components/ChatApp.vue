@@ -45,7 +45,7 @@
             msg.sender === 'user' ? 'message-user' : 'message-machine'
           ]"
         >
-          <p>{{ msg.text }}</p>
+          <div class="message-content" v-html="renderMarkdown(msg.text)"></div>
           <span v-if="msg.sender === 'machine'" class="model-tag">{{ msg.model }}</span>
 
           <!-- Display source citations if available -->
@@ -85,6 +85,7 @@
 
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from 'vue';
+import { marked } from 'marked';
 import { useApi } from '../composables/useApi'
 import { useAuth } from '../composables/useAuth'
 import { usePreferences, type ModelOption } from '../composables/usePreferences'
@@ -124,6 +125,12 @@ const showFullTranscription = ref(false);
 const selectedModel = ref('gemma3:1b');
 const availableModels = ref<ModelOption[]>(prefsAvailableModels);
 
+// Configure marked options
+marked.setOptions({
+  breaks: true,        // Convert \n to <br>
+  gfm: true,          // GitHub Flavored Markdown
+});
+
 // Load user preferences on component mount
 onMounted(async () => {
   if (isAuthenticated.value) {
@@ -133,6 +140,15 @@ onMounted(async () => {
 });
 
 // Helper functions
+const renderMarkdown = (text: string): string => {
+  try {
+    return marked.parse(text) as string;
+  } catch (error) {
+    console.error('Error parsing markdown:', error);
+    return text;
+  }
+};
+
 const getModelDescription = (modelName: string): string => {
   const modelInfo = getModelInfo(modelName);
   return modelInfo?.description || 'General purpose model';
@@ -514,6 +530,80 @@ defineExpose({
 .message p {
   margin: 0;
   line-height: 1.4;
+}
+
+/* Markdown content styling */
+.message-content {
+  line-height: 1.6;
+}
+
+.message-content p {
+  margin: 0 0 8px 0;
+}
+
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.message-content strong {
+  font-weight: 600;
+}
+
+.message-content em {
+  font-style: italic;
+}
+
+.message-content ul,
+.message-content ol {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.message-content li {
+  margin: 4px 0;
+}
+
+.message-content code {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.message-content pre {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.message-content pre code {
+  background-color: transparent;
+  padding: 0;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+  margin: 12px 0 8px 0;
+  font-weight: 600;
+}
+
+.message-content h1 { font-size: 1.4em; }
+.message-content h2 { font-size: 1.2em; }
+.message-content h3 { font-size: 1.1em; }
+.message-content h4 { font-size: 1em; }
+
+/* Adjust code background for user messages */
+.message-user .message-content code {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.message-user .message-content pre {
+  background-color: rgba(255, 255, 255, 0.2);
 }
 
 .input-container {
